@@ -1,0 +1,28 @@
+<launch>
+  <arg name="real_mode" default="false" />
+  <arg name="use_sim_time" default="true" />
+  <arg name="publish_rate_hz" default="20.0" />
+  <arg name="sequence_start_sec" default="100.0" />
+  <arg name="cycle_samples" default="40" />
+  <arg name="obstacle_start_sample" default="10" />
+  <arg name="obstacle_end_sample" default="20" />
+
+  <param name="/use_sim_time" value="$(arg use_sim_time)" />
+  <rosparam command="load" file="$(find stier_slam_bringup)/config/topics.yaml" />
+
+  <node pkg="stier_slam_test_support" type="synthetic_sensor_node.py"
+        name="synthetic_sensor" output="screen" required="true">
+    <param name="real_mode" type="bool" value="$(arg real_mode)" />
+    <param name="publish_clock" type="bool" value="$(arg use_sim_time)" />
+    <param name="publish_rate_hz" type="double" value="$(arg publish_rate_hz)" />
+    <param name="sequence_start_sec" type="double" value="$(arg sequence_start_sec)" />
+    <param name="cycle_samples" type="int" value="$(arg cycle_samples)" />
+    <param name="obstacle_start_sample" type="int" value="$(arg obstacle_start_sample)" />
+    <param name="obstacle_end_sample" type="int" value="$(arg obstacle_end_sample)" />
+    <param name="base_frame" value="base_link" />
+    <param name="lidar_frame" value="lidar_link" />
+    <param name="imu_frame" value="imu_link" />
+    <param name="gnss_frame" value="gps_link" />
+    <param name="camera_frame" value="camera_link" />
+  </node>
+</launch>

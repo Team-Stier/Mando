@@ -1,0 +1,4 @@
+<launch>
+  <test test-name="launch_contracts" pkg="stier_slam_bringup"
+        type="test_launch_contracts.py" time-limit="30.0" />
+</launch>

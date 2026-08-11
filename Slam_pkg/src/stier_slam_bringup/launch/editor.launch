@@ -1,0 +1,12 @@
+<launch>
+  <arg name="course_dir" />
+  <arg name="workspace_id" />
+  <arg name="web_root" default="$(find stier_slam_core)/web" />
+  <arg name="host" default="127.0.0.1" />
+  <arg name="port" default="8765" />
+  <arg name="unsafe_allow_nonlocal" default="false" />
+
+  <node pkg="stier_slam_core" type="map_editor_server.py" name="map_editor"
+        output="screen" required="true"
+        args="--course-dir &quot;$(arg course_dir)&quot; --workspace-id &quot;$(arg workspace_id)&quot; --web-root &quot;$(arg web_root)&quot; --host &quot;$(arg host)&quot; --port &quot;$(arg port)&quot; --unsafe-allow-nonlocal &quot;$(arg unsafe_allow_nonlocal)&quot;" />
+</launch>

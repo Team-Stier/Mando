@@ -1,0 +1,23 @@
+stier_slam:
+  topics:
+    inputs:
+      wheel_encoder: /slam/input/wheel_encoder
+      scan_raw: /slam/input/scan_raw
+      imu: /slam/input/imu
+      gnss_fix: /slam/input/gnss/fix
+      gnss_rtk_status: /slam/input/gnss/rtk_status
+      vehicle_speed: /slam/input/vehicle_speed
+      steering_angle: /slam/input/steering_angle
+      camera_front_image: /slam/input/camera/front/image_raw
+    processed:
+      wheel_odometry: /slam/odometry/wheel
+      local_odometry: /slam/odometry/local
+      leveled_points: /slam/scan/leveled_points
+      accepted_gnss: /slam/gnss/fix_accepted
+    outputs:
+      localization_pose: /slam/localization/pose
+      released_map: /slam/map/released
+      diagnostics: /slam/diagnostics
+      rtk_diagnostics: /slam/diagnostics/rtk_gate
+      live_obstacle_points: /slam/live_obstacles/points
+      live_obstacle_grid: /slam/live_obstacles/grid
