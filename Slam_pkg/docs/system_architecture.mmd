@@ -1,0 +1,162 @@
+%% Stier RTAB-Map SLAM architecture
+%% Source of truth: current feature/rtabmap-slam-implementation checkout.
+%% Solid arrows are implemented ROS/data paths. Dashed arrows are operator or
+%% deployment boundaries. Hardware adapters and physical calibration remain pending.
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "Noto Sans CJK KR, Noto Sans KR, DejaVu Sans, sans-serif",
+    "fontSize": "17px",
+    "lineColor": "#52606d",
+    "primaryTextColor": "#102a43"
+  },
+  "flowchart": {
+    "defaultRenderer": "elk",
+    "curve": "basis",
+    "htmlLabels": true,
+    "nodeSpacing": 28,
+    "rankSpacing": 52,
+    "useMaxWidth": false
+  }
+}}%%
+flowchart TB
+  subgraph SUPPLIERS["1. 입력 공급자"]
+    direction LR
+    HW["실차 센서 드라이버 + adapter<br/><b>LiDAR · IMU · RTK-GNSS · 차량상태 · Camera</b><br/>센서 모델·extrinsic·차량 보정 미완료"]
+    REPLAY["rosbag replay<br/><b>--clock / 단일 시간 기준</b>"]
+    SYNTH["synthetic_sensor_node<br/><b>시험 전용 supplier</b>"]
+  end
+
+  CONTRACT["Normalized ROS input contract<br/><b>/slam/input/*</b><br/>scan_raw · imu · gnss/fix · gnss/rtk_status<br/>vehicle_speed · steering_angle · camera/front/image_raw"]
+
+  HW -. "실차 모드" .-> CONTRACT
+  REPLAY -. "오프라인 재생" .-> CONTRACT
+  SYNTH -. "합성 smoke" .-> CONTRACT
+
+  EXCLUSIVE["공급자 배타성<br/>실차 / replay / synthetic 중 하나만<br/>같은 normalized topic에 publish"]
+  EXCLUSIVE -.-> CONTRACT
+
+  subgraph RECORDING["2. 수동 주행 기록"]
+    direction LR
+    REC["rosbag record<br/><b>record.launch</b><br/>normalized sensors + /tf + diagnostics + /clock"]
+    BAG[("LZ4 rosbag<br/>원본 기록")]
+    REC --> BAG
+  end
+
+  CONTRACT --> REC
+
+  subgraph PROCESSING["3. 공통 전처리 · Local Odometry"]
+    direction LR
+    LEVELER["scan_leveler_node<br/><b>LaserScan + IMU roll/pitch</b><br/>경사 보정, yaw 제외"]
+    CLOUD["/slam/scan/leveled_points<br/><b>PointCloud2 · base_link</b>"]
+    WHEEL["vehicle_odometry_node<br/><b>Ackermann 적분</b>"]
+    WHEEL_ODOM["/slam/odometry/wheel<br/><b>Odometry · TF 미발행</b>"]
+    EKF["robot_localization<br/><b>ekf_local</b><br/>wheel x-velocity + IMU yaw/yaw-rate"]
+    LOCAL_ODOM["/slam/odometry/local<br/><b>planar Odometry</b>"]
+    RTK["rtk_gate_node<br/><b>FIX · covariance · innovation · timestamp gate</b>"]
+    FIX["/slam/gnss/fix_accepted<br/><b>NavSatFix</b>"]
+    HEALTH["sensor_health_node<br/><b>freshness / timestamp 진단</b>"]
+    DIAG["/slam/diagnostics<br/>/slam/diagnostics/rtk_gate"]
+
+    LEVELER --> CLOUD
+    WHEEL --> WHEEL_ODOM --> EKF --> LOCAL_ODOM
+    RTK --> FIX
+    HEALTH --> DIAG
+  end
+
+  CONTRACT -- "scan_raw + imu" --> LEVELER
+  CONTRACT -- "vehicle_speed + steering_angle" --> WHEEL
+  CONTRACT -- "imu" --> EKF
+  CONTRACT -- "gnss/fix + rtk_status" --> RTK
+  CONTRACT -- "모든 입력 감시" --> HEALTH
+
+  subgraph SLAM["4. RTAB-Map 2D — 실행 모드에 따라 설정 전환"]
+    direction LR
+    GUARD["rtabmap_runtime_guard<br/><b>경로 · hash · immutable artifact 검증</b>"]
+    RTAB["rtabmap_slam/rtabmap<br/><b>ICP scan cloud · Force3DoF</b><br/>Mapping: IncrementalMemory=true<br/>Localization: IncrementalMemory=false"]
+    POSE["/slam/localization/pose<br/><b>PoseWithCovarianceStamped</b>"]
+    MAP_TF["TF: map → odom<br/><b>RTAB-Map 단독 소유</b>"]
+    SESSION[("Mapping session<br/>stier_slam_mapping.db + rtabmap.ini")]
+
+    GUARD --> RTAB
+    RTAB --> POSE
+    RTAB --> MAP_TF
+    RTAB -- "mapping mode" --> SESSION
+  end
+
+  CLOUD -- "scan_cloud" --> RTAB
+  LOCAL_ODOM -- "odom" --> RTAB
+  CONTRACT -- "imu" --> RTAB
+  FIX -- "gps/fix" --> RTAB
+
+  subgraph MAPS["5. 지도 편집 · 불변 Release"]
+    direction LR
+    RAW[("raw/&lt;capture_id&gt;<br/><b>map.db · base.pgm · base.yaml</b><br/>불변 capture")]
+    WORK[("workspaces/&lt;workspace_id&gt;<br/><b>static_overlay.json<br/>semantic_layer.json</b>")]
+    EDITOR["localhost map editor<br/><b>map_editor_server · 127.0.0.1:8765</b>"]
+    MANAGER["ReleaseManager / map_release_cli<br/><b>schema · geometry · SHA-256 · atomic activation</b>"]
+    RELEASE[("releases/&lt;release_id&gt;<br/><b>map.pgm · map.yaml · overlays · manifest.json</b><br/>불변 release")]
+    ACTIVE["active_release.json<br/><b>선택 포인터</b>"]
+
+    RAW --> MANAGER --> WORK
+    EDITOR <--> WORK
+    WORK --> MANAGER --> RELEASE --> ACTIVE
+  end
+
+  SESSION -. "운영자 export / capture 등록" .-> RAW
+  RELEASE -. "localization launch 입력" .-> GUARD
+
+  subgraph RUNTIME["6. Released-map Localization · 관찰 출력"]
+    direction LR
+    BUNDLE[("검증된 runtime bundle<br/><b>map.db · map.yaml · rtabmap.ini</b>")]
+    MAP_SERVER["map_server<br/><b>released_map_server</b>"]
+    RELEASED_MAP["/slam/map/released<br/><b>OccupancyGrid · read-only</b>"]
+    LIVE["live_obstacle_node<br/><b>released map과 겹친 점 제거 · TTL 0.75 s</b>"]
+    LIVE_OUT["/slam/live_obstacles/points<br/>/slam/live_obstacles/grid<br/><b>비영구 관찰 layer</b>"]
+    VIEW["RViz / 운영자 관찰<br/><b>map · pose · TF · diagnostics · live obstacles</b>"]
+
+    BUNDLE --> MAP_SERVER --> RELEASED_MAP --> LIVE --> LIVE_OUT --> VIEW
+  end
+
+  GUARD -- "localization mode staging" --> BUNDLE
+  BUNDLE --> RTAB
+  CLOUD --> LIVE
+  MAP_TF -- "timestamp 기준 map transform" --> LIVE
+  POSE --> VIEW
+  DIAG --> VIEW
+  RELEASED_MAP --> VIEW
+
+  subgraph TFOWN["TF 소유권"]
+    direction LR
+    MAP_F["map"] -->|"RTAB-Map"| ODOM_F["odom"] -->|"local EKF"| BASE_F["base_link"]
+    BASE_F -->|"URDF / static TF 단일 owner"| SENSORS_F["lidar_link · imu_link · gps_link · camera_link"]
+  end
+
+  EKF -. "TF publish" .-> ODOM_F
+  RTAB -. "TF publish" .-> MAP_F
+
+  SCOPE["현재 범위<br/><b>수동 주행 기록 · 2D mapping · 지도 편집/release · localization 관찰</b><br/>Planner · Controller · 장애물 회피 판단은 미구현/범위 밖<br/>실차 mapping 정확도와 RTAB-Map loop closure는 아직 검증 전"]
+
+  classDef external fill:#fff4d6,stroke:#d97706,stroke-width:2px,color:#7c2d12;
+  classDef topic fill:#e8f1fb,stroke:#2563eb,stroke-width:1.5px,color:#102a43;
+  classDef core fill:#e8f7ee,stroke:#16803c,stroke-width:2px,color:#123524;
+  classDef thirdparty fill:#eeeafe,stroke:#6d4aff,stroke-width:2px,color:#2e1065;
+  classDef storage fill:#f4f6f8,stroke:#52606d,stroke-width:2px,color:#243b53;
+  classDef safety fill:#fff0f0,stroke:#c92a2a,stroke-width:2px,color:#7f1d1d;
+  classDef output fill:#e9fbfa,stroke:#0f766e,stroke-width:2px,color:#134e4a;
+
+  class HW,REPLAY,SYNTH external;
+  class CONTRACT,CLOUD,WHEEL_ODOM,LOCAL_ODOM,FIX,DIAG,POSE,MAP_TF,RELEASED_MAP,LIVE_OUT topic;
+  class REC,LEVELER,WHEEL,RTK,HEALTH,GUARD,EDITOR,MANAGER,LIVE core;
+  class EKF,RTAB,MAP_SERVER thirdparty;
+  class BAG,SESSION,RAW,WORK,RELEASE,ACTIVE,BUNDLE storage;
+  class EXCLUSIVE,SCOPE safety;
+  class VIEW,MAP_F,ODOM_F,BASE_F,SENSORS_F output;
+
+  style SUPPLIERS fill:#fffbeb,stroke:#d97706,stroke-width:1px
+  style RECORDING fill:#f8fafc,stroke:#64748b,stroke-width:1px
+  style PROCESSING fill:#f0fdf4,stroke:#16a34a,stroke-width:1px
+  style SLAM fill:#f5f3ff,stroke:#7c3aed,stroke-width:1px
+  style MAPS fill:#f8fafc,stroke:#64748b,stroke-width:1px
+  style RUNTIME fill:#f0fdfa,stroke:#0f766e,stroke-width:1px
+  style TFOWN fill:#eff6ff,stroke:#2563eb,stroke-width:1px

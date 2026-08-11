@@ -1,0 +1,71 @@
+<launch>
+  <arg name="real_mode" default="false" />
+  <arg name="calibration_required" default="true" />
+  <arg name="mapping_runtime_root" default="$(env HOME)/.ros/stier_slam_mapping" />
+  <!-- Override this arg with a named directory when the DB must be exported later. -->
+  <arg name="mapping_session_dir" default="$(arg mapping_runtime_root)/$(anon mapping)" />
+  <arg name="map_yaml" default="" />
+  <arg name="use_sim_time" default="false" />
+  <arg name="rviz" default="false" />
+
+  <param name="use_sim_time" value="$(arg use_sim_time)" />
+  <rosparam command="load" file="$(find stier_slam_bringup)/config/topics.yaml" />
+
+  <node pkg="stier_slam_core" type="wheel_encoder_adapter_node.py"
+        name="wheel_encoder_adapter" output="screen" required="true">
+    <rosparam command="load" file="$(find stier_slam_bringup)/config/encoder.yaml" />
+    <param name="real_mode" value="$(arg real_mode)" />
+    <param name="calibration_required" value="$(arg calibration_required)" />
+  </node>
+
+  <node pkg="stier_slam_core" type="vehicle_odometry_node.py" name="wheel_odometry" output="screen" required="true">
+    <rosparam command="load" file="$(find stier_slam_bringup)/config/vehicle.yaml" />
+    <param name="real_mode" value="$(arg real_mode)" />
+    <param name="calibration_required" value="$(arg calibration_required)" />
+  </node>
+
+  <node pkg="stier_slam_core" type="scan_leveler_node.py" name="scan_leveler" output="screen" required="true">
+    <rosparam command="load" file="$(find stier_slam_bringup)/config/scan_leveling.yaml" />
+  </node>
+
+  <node pkg="stier_slam_core" type="rtk_gate_node.py" name="rtk_gate" output="screen">
+    <rosparam command="load" file="$(find stier_slam_bringup)/config/rtk_gate.yaml" />
+  </node>
+
+  <node pkg="robot_localization" type="ekf_localization_node" name="ekf_local" output="screen" required="true">
+    <rosparam command="load" file="$(find stier_slam_bringup)/config/ekf_local.yaml" />
+    <param name="publish_tf" value="true" />
+    <remap from="odometry/filtered" to="/slam/odometry/local" />
+  </node>
+
+  <!-- RTAB-Map is the sole publisher of map -> odom. -->
+  <node pkg="rtabmap_slam" type="rtabmap" name="rtabmap" output="screen" required="true"
+        launch-prefix="rosrun stier_slam_core rtabmap_runtime_guard.py --source-config &quot;$(find stier_slam_bringup)/config/rtabmap_mapping.ini&quot; --runtime-config &quot;$(arg mapping_session_dir)/rtabmap.ini&quot; --mapping-database &quot;$(arg mapping_session_dir)/stier_slam_mapping.db&quot; --mapping-runtime-root &quot;$(arg mapping_runtime_root)&quot; --mapping-session-dir &quot;$(arg mapping_session_dir)&quot; --">
+    <param name="frame_id" value="base_link" />
+    <param name="map_frame_id" value="map" />
+    <param name="odom_frame_id" type="string" value="" />
+    <param name="publish_tf" value="true" />
+    <param name="database_path" value="$(arg mapping_session_dir)/stier_slam_mapping.db" />
+    <param name="config_path" type="string" value="$(arg mapping_session_dir)/rtabmap.ini" />
+    <param name="Mem/IncrementalMemory" type="string" value="true" />
+    <param name="subscribe_depth" type="bool" value="false" />
+    <param name="subscribe_rgb" type="bool" value="false" />
+    <param name="subscribe_rgbd" type="bool" value="false" />
+    <param name="subscribe_stereo" type="bool" value="false" />
+    <param name="subscribe_scan" type="bool" value="false" />
+    <param name="subscribe_scan_cloud" type="bool" value="true" />
+    <param name="scan_cloud_is_2d" value="true" />
+    <param name="Reg/Force3DoF" type="string" value="true" />
+    <remap from="scan_cloud" to="/slam/scan/leveled_points" />
+    <remap from="odom" to="/slam/odometry/local" />
+    <remap from="imu" to="/slam/input/imu" />
+    <remap from="gps/fix" to="/slam/gnss/fix_accepted" />
+    <remap from="localization_pose" to="/slam/localization/pose" />
+  </node>
+
+  <node pkg="stier_slam_core" type="sensor_health_node.py" name="sensor_health" output="screen">
+    <rosparam command="load" file="$(find stier_slam_bringup)/config/timeouts.yaml" />
+  </node>
+
+  <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz" args="-d $(find stier_slam_bringup)/rviz/slam.rviz" />
+</launch>

@@ -1,0 +1,20 @@
+<launch>
+  <param name="/use_sim_time" type="bool" value="false" />
+  <node pkg="stier_slam_test_support" type="synthetic_sensor_node.py"
+        name="synthetic_wall_time_sensor" output="screen" required="true">
+    <param name="real_mode" type="bool" value="false" />
+    <param name="publish_clock" type="bool" value="false" />
+    <param name="publish_rate_hz" type="double" value="20.0" />
+    <param name="sequence_start_sec" type="double" value="100.0" />
+    <param name="cycle_samples" type="int" value="40" />
+    <param name="obstacle_start_sample" type="int" value="10" />
+    <param name="obstacle_end_sample" type="int" value="20" />
+    <param name="base_frame" value="base_link" />
+    <param name="lidar_frame" value="lidar_link" />
+    <param name="imu_frame" value="imu_link" />
+    <param name="gnss_frame" value="gps_link" />
+    <param name="camera_frame" value="camera_link" />
+  </node>
+  <test test-name="synthetic_wall_time" pkg="stier_slam_test_support"
+        type="test_synthetic_wall_time.py" time-limit="20.0" />
+</launch>

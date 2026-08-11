@@ -1,0 +1,38 @@
+<launch>
+  <param name="/use_sim_time" type="bool" value="true" />
+  <rosparam command="load" file="$(find stier_slam_bringup)/config/topics.yaml" />
+  <node pkg="stier_slam_test_support" type="synthetic_sensor_node.py"
+        name="synthetic_sensor" output="screen" required="true">
+    <param name="real_mode" type="bool" value="false" />
+    <param name="publish_clock" type="bool" value="true" />
+    <param name="publish_rate_hz" type="double" value="20.0" />
+    <param name="sequence_start_sec" type="double" value="100.0" />
+    <param name="cycle_samples" type="int" value="40" />
+    <param name="obstacle_start_sample" type="int" value="10" />
+    <param name="obstacle_end_sample" type="int" value="20" />
+    <param name="base_frame" value="base_link" />
+    <param name="lidar_frame" value="lidar_link" />
+    <param name="imu_frame" value="imu_link" />
+    <param name="gnss_frame" value="gps_link" />
+    <param name="camera_frame" value="camera_link" />
+  </node>
+
+  <node pkg="stier_slam_core" type="vehicle_odometry_node.py"
+        name="wheel_odometry" output="screen" required="true">
+    <param name="wheelbase_m" value="0.32" />
+    <param name="max_abs_steering_rad" value="0.6" />
+    <param name="max_abs_speed_mps" value="8.0" />
+    <param name="control_pair_timeout_sec" value="0.10" />
+    <rosparam param="pose_covariance">[0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 999999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 999999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 999999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1]</rosparam>
+    <rosparam param="twist_covariance">[0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 999999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 999999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 999999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 999999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1]</rosparam>
+  </node>
+
+  <node pkg="map_server" type="map_server" name="synthetic_map_server"
+        args="$(find stier_slam_test_support)/maps/demo/base.yaml"
+        output="screen" required="true">
+    <remap from="map" to="/slam/test/demo_map" />
+    <remap from="map_metadata" to="/slam/test/demo_map_metadata" />
+  </node>
+  <test test-name="synthetic_topics" pkg="stier_slam_test_support"
+        type="test_synthetic_topics.py" time-limit="45.0" />
+</launch>

@@ -1,0 +1,32 @@
+# robot_localization owns only odom -> base_link.  RTK remains an RTAB-Map input.
+frequency: 30.0
+sensor_timeout: 0.25
+two_d_mode: true
+publish_tf: true
+print_diagnostics: true
+odom_frame: odom
+base_link_frame: base_link
+world_frame: odom
+
+odom0: /slam/odometry/wheel
+odom0_queue_size: 10
+odom0_nodelay: true
+odom0_differential: false
+odom0_relative: false
+odom0_config: [false, false, false,
+               false, false, false,
+               true, false, false,
+               false, false, false,
+               false, false, false]
+
+imu0: /slam/input/imu
+imu0_queue_size: 20
+imu0_nodelay: false
+imu0_differential: false
+imu0_relative: false
+imu0_remove_gravitational_acceleration: false
+imu0_config: [false, false, false,
+              false, false, true,
+              false, false, false,
+              false, false, true,
+              false, false, false]

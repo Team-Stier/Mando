@@ -1,0 +1,27 @@
+# Starting values only: measure each hardware sensor's cadence and transport latency
+# before clearing calibration_required for a real-vehicle launch.
+calibration_required: true
+future_tolerance_sec: 0.20
+publish_rate_hz: 5.0
+sensors:
+  scan_raw:
+    timeout_sec: 0.25
+    has_header_stamp: true
+  imu:
+    timeout_sec: 0.15
+    has_header_stamp: true
+  gnss_fix:
+    timeout_sec: 1.50
+    has_header_stamp: true
+  gnss_rtk_status:
+    timeout_sec: 1.50
+    has_header_stamp: false
+  vehicle_speed:
+    timeout_sec: 0.25
+    has_header_stamp: true
+  steering_angle:
+    timeout_sec: 0.25
+    has_header_stamp: false
+  camera_front_image:
+    timeout_sec: 0.25
+    has_header_stamp: true
