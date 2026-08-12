@@ -1,0 +1,110 @@
+%% Sensor-focused flow for the current Slam_pkg implementation.
+%% Solid arrows are implemented data paths. Calibration and vendor drivers are external.
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "Noto Sans CJK KR, Noto Sans KR, DejaVu Sans, sans-serif",
+    "fontSize": "18px",
+    "lineColor": "#52606d",
+    "primaryTextColor": "#102a43"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "htmlLabels": true,
+    "nodeSpacing": 34,
+    "rankSpacing": 58,
+    "useMaxWidth": false
+  }
+}}%%
+flowchart TB
+  subgraph SENSORS["1. 센서"]
+    direction LR
+    LIDAR["2D LiDAR<br/><b>LaserScan</b>"]
+    IMU["IMU<br/><b>자세 · 각속도</b>"]
+    ENCODER["Wheel Encoder<br/><b>JointState · rad / rad/s</b>"]
+    STEERING["Steering Sensor<br/><b>road-wheel angle · rad</b>"]
+    GNSS["GNSS / RTK<br/><b>WGS84 fix + RTK 상태</b>"]
+  end
+
+  subgraph TOPICS["2. 정규화 입력 토픽"]
+    direction LR
+    SCAN_TOPIC["/slam/input/scan_raw"]
+    IMU_TOPIC["/slam/input/imu"]
+    ENCODER_TOPIC["/slam/input/wheel_encoder"]
+    STEERING_TOPIC["/slam/input/steering_angle"]
+    GNSS_TOPIC["/slam/input/gnss/fix<br/>/slam/input/gnss/rtk_status"]
+  end
+
+  subgraph PROCESSING["3. 전처리 · 센서 융합"]
+    direction LR
+    LEVELER["scan_leveler_node<br/><b>IMU roll/pitch로 경사 보정</b>"]
+    ENCODER_ADAPTER["wheel_encoder_adapter_node<br/><b>좌우 wheel → 차량 속도</b>"]
+    SPEED_TOPIC["/slam/input/vehicle_speed<br/><b>m/s</b>"]
+    WHEEL_ODOM["vehicle_odometry_node<br/><b>속도 + 조향 · Ackermann</b>"]
+    WHEEL_TOPIC["/slam/odometry/wheel"]
+    EKF["robot_localization / ekf_local<br/><b>wheel x속도 + IMU yaw rate</b>"]
+    LOCAL_ODOM["/slam/odometry/local<br/><b>odom → base_link</b>"]
+    RTK_GATE["rtk_gate_node<br/><b>FIX · covariance · 시간 검증</b>"]
+    FIX_TOPIC["/slam/gnss/fix_accepted"]
+    CLOUD_TOPIC["/slam/scan/leveled_points<br/><b>PointCloud2 · base_link</b>"]
+  end
+
+  subgraph SLAM["4. SLAM"]
+    direction LR
+    RTAB["RTAB-Map 2D<br/><b>leveled cloud + local odom + IMU + GNSS</b>"]
+  end
+
+  subgraph OUTPUTS["5. 출력"]
+    direction LR
+    MAP["2D Occupancy Map<br/><b>mapping 결과</b>"]
+    POSE["/slam/localization/pose<br/><b>map 기준 차량 위치</b>"]
+    TF["TF: map → odom → base_link"]
+  end
+
+  LIDAR --> SCAN_TOPIC --> LEVELER --> CLOUD_TOPIC --> RTAB
+  IMU --> IMU_TOPIC
+  IMU_TOPIC -->|"roll / pitch"| LEVELER
+  IMU_TOPIC -->|"yaw rate"| EKF
+  IMU_TOPIC -->|"orientation"| RTAB
+
+  ENCODER --> ENCODER_TOPIC --> ENCODER_ADAPTER --> SPEED_TOPIC
+  SPEED_TOPIC --> WHEEL_ODOM
+  STEERING --> STEERING_TOPIC --> WHEEL_ODOM
+  WHEEL_ODOM --> WHEEL_TOPIC --> EKF --> LOCAL_ODOM --> RTAB
+
+  GNSS --> GNSS_TOPIC --> RTK_GATE --> FIX_TOPIC --> RTAB
+
+  RTAB --> MAP
+  RTAB --> POSE
+  RTAB -->|"map → odom"| TF
+  LOCAL_ODOM -->|"odom → base_link"| TF
+
+  NOTE["핵심<br/><b>엔코더와 IMU는 local EKF에서 융합</b><br/>LiDAR · local odom · IMU · GNSS는 RTAB-Map 입력"]
+  NOTE -.-> EKF
+  NOTE -.-> RTAB
+
+  classDef lidar fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0c4a6e;
+  classDef imu fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
+  classDef encoder fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d;
+  classDef steering fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843;
+  classDef gnss fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95;
+  classDef process fill:#f8fafc,stroke:#475569,stroke-width:2px,color:#1e293b;
+  classDef slam fill:#fee2e2,stroke:#dc2626,stroke-width:3px,color:#7f1d1d;
+  classDef output fill:#ccfbf1,stroke:#0f766e,stroke-width:2px,color:#134e4a;
+  classDef note fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+
+  class LIDAR,SCAN_TOPIC,CLOUD_TOPIC lidar;
+  class IMU,IMU_TOPIC imu;
+  class ENCODER,ENCODER_TOPIC,ENCODER_ADAPTER,SPEED_TOPIC,WHEEL_ODOM,WHEEL_TOPIC,EKF,LOCAL_ODOM encoder;
+  class STEERING,STEERING_TOPIC steering;
+  class GNSS,GNSS_TOPIC,RTK_GATE,FIX_TOPIC gnss;
+  class LEVELER process;
+  class RTAB slam;
+  class MAP,POSE,TF output;
+  class NOTE note;
+
+  style SENSORS fill:#ffffff,stroke:#94a3b8,stroke-width:1px
+  style TOPICS fill:#f8fafc,stroke:#94a3b8,stroke-width:1px
+  style PROCESSING fill:#f8fafc,stroke:#64748b,stroke-width:1px
+  style SLAM fill:#fff7f7,stroke:#dc2626,stroke-width:1px
+  style OUTPUTS fill:#f0fdfa,stroke:#0f766e,stroke-width:1px
