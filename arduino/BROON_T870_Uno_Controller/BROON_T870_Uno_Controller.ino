@@ -4,7 +4,7 @@
 #include <Arduino.h>          // 아두이노 기본 기능 (digitalWrite, analogWrite 등)
 #include <util/atomic.h>      // 인터럽트 중에 데이터를 안전하게 읽기 위한 도구
 
-#include <BroonT870Core.h>    // BROON T870 차량 전용 핵심 로직 모음
+#include "BroonT870Core.h"    // BROON T870 차량 전용 핵심 로직 모음
 
 #include "BuildOptions.h"     // "ROS 켜기/끄기", "출력 허용 여부" 같은 빌드 설정 스위치
 #include "ControllerConfig.h" // 핀 번호, 속도 한계값 등 구체적인 설정값들
@@ -24,6 +24,7 @@ using BroonT870::RcSnapshot;           // RC 조종기 신호 스냅샷 타입
 using BroonT870::SafetyInputs;         // 안전 판단에 필요한 입력값 묶음 타입
 using BroonT870::SafetyResult;         // 안전 판단 결과 타입
 using BroonT870::SafetyState;          // 안전 시스템 내부 상태 타입
+using BroonT870::SpeedPiState;
 using BroonT870::SteeringWatchdogState; // 조향 워치독(감시자) 내부 상태 타입
 using BroonT870::VehicleCommand;       // 차량 명령 타입 (속도, 조향, 유효 여부 등)
 using BroonT870::MODE_RC;              // RC 조종 모드를 나타내는 상수
@@ -35,6 +36,8 @@ using BroonT870::FAULT_NONE;           // 오류 없음을 나타내는 상수
 using BroonT870::FAULT_STEERING_RUNTIME; // 조향 중 실행 오류 코드 상수
 using BroonT870::FAULT_STEERING_SENSOR;  // 조향 센서 오류 코드 상수
 using BroonT870::FAULT_STEERING_STALL;   // 조향 모터 막힘 오류 코드 상수
+using BroonT870::FAULT_DRIVE_NO_FEEDBACK;
+using BroonT870::FAULT_DRIVE_OVERSPEED;
 
 using BroonT870Controller::MotorPins;  // 모터 핀 묶음 타입 (PWM핀 + 방향핀)
 
@@ -53,9 +56,9 @@ BroonT870::BroonT870RcInput rcInput; // RC 조종기 신호를 수신/파싱하�
 BroonT870Controller::RosBridge rosBridge; // 컴퓨터(ROS)와 통신하는 브리지 객체
 #endif
 ControlMode selectedMode = MODE_RC;  // 현재 선택된 조종 모드 (기본값: RC 모드)
-VehicleCommand rcCommand  = {0, 0, MODE_RC,  0UL, false, false}; // RC 조종기 명령 {조향ADC, 구동PWM, 모드, 수신시각, 유효?, 브레이크?}
-VehicleCommand rosCommand = {0, 0, MODE_ROS, 0UL, false, false}; // ROS 컴퓨터 명령 {조향ADC, 구동PWM, 모드, 수신시각, 유효?, 브레이크?}
-VehicleCommand activeCommand = {0, 0, MODE_RC, 0UL, false, false}; // 실제 실행할 명령 (RC/ROS 중 선택된 것)
+VehicleCommand rcCommand  = {0, 0, 0.0f, MODE_RC,  0UL, false, false};
+VehicleCommand rosCommand = {0, 0, 0.0f, MODE_ROS, 0UL, false, false};
+VehicleCommand activeCommand = {0, 0, 0.0f, MODE_RC, 0UL, false, false};
 SafetyState safetyState   = {STATE_BOOT_LOCKED, FAULT_NONE, 0UL, false}; // 안전 시스템 내부 상태 (부팅 잠금으로 시작)
 SafetyResult safetyResult = {STATE_BOOT_LOCKED, FAULT_NONE, false, true}; // 안전 판단 결과 (출력 금지로 시작)
 DrivePairState drivePairState;                                  // 앞/뒤 구동 모터 내부 상태 (방향 전환 타이밍 추적 등)
@@ -63,6 +66,10 @@ MotorOutputState frontMotorOutputState    = {false};            // 앞 구동 �
 MotorOutputState rearMotorOutputState     = {false};            // 뒤 구동 모터 현재 출력 상태
 MotorOutputState steeringMotorOutputState = {false};            // 조향(핸들) 모터 현재 출력 상태
 EncoderMeasurement frontEncoderMeasurement = {0, 0, 0.0f, 0.0f, false}; // 앞바퀴 엔코더 측정값 {변화카운트, 총카운트, RPM, 속도m/s, 보정됨?}
+SpeedPiState rosSpeedPiState = {0.0f, 0.0f};
+BroonT870::DriveFeedbackWatchdogState driveFeedbackWatchdogState = {0UL,
+                                                                    false};
+RcSnapshot latestRcSnapshot = {0U, 0U, 0U, false, false, false}; // 가장 최근 RC 원시 펄스와 유효성
 
 bool outputHardwareInitialized = false; // 모터 핀 초기화가 완료됐는지 여부
 bool outputsAllowed = false;            // 현재 모터 출력이 허용된 상태인지 여부
@@ -70,16 +77,33 @@ bool configurationValid = false;        // 설정값(캘리브레이션 등)이 
 bool steeringSensorFault = false;       // 조향 센서 오류 발생 여부
 bool steeringStallFault = false;        // 조향 모터 막힘(스톨) 오류 발생 여부
 bool steeringRuntimeFault = false;      // 조향 실행 중 오류 발생 여부
-bool estopActive = true;                // 비상정지(E-STOP) 버튼이 눌려있는지 여부 (초기값: 눌림으로 간주)
+bool driveNoFeedbackFault = false;
+bool driveOverspeedFault = false;
+bool rcStopActive = true;               // 조종기 throttle-cut 또는 신호 손실 정지 상태(초기값: 정지)
+int16_t rosSpeedControlPwm = 0;
+int16_t latestDriveRequestedPwm = 0;
+int16_t latestFrontDrivePwm = 0;
+int16_t latestRearDrivePwm = 0;
+int16_t latestSteeringGuardedPwm = 0;
+int16_t latestSteeringAuthorizedPwm = 0;
+float measuredAbsoluteKph = 0.0f;
 int16_t latestSteeringAdc = 0;          // 조향 센서 최신 ADC값 (0~1023, 현재 핸들 각도)
-SteeringWatchdogState steeringWatchdogState = {false, 0, 0UL, 0UL}; // 조향 워치독 내부 상태
+int16_t minimumSeenSteeringAdc = 1023;  // 부팅 후 관측한 조향 ADC 최솟값
+int16_t maximumSeenSteeringAdc = 0;     // 부팅 후 관측한 조향 ADC 최댓값
+SteeringWatchdogState steeringWatchdogState = {false, 0, 0UL, 0UL, 0}; // 조향 워치독 내부 상태
+BroonT870::SteeringStabilizerState steeringStabilizerState =
+    BroonT870::initialSteeringStabilizerState();
 uint32_t lastControlMs = 0UL;           // 마지막으로 제어 주기 처리를 실행한 시각(ms)
 uint32_t lastEncoderSampleMs = 0UL;    // 마지막으로 엔코더를 샘플링한 시각(ms)
 uint32_t lastStatusMs = 0UL;           // 마지막으로 상태를 출력한 시각(ms)
+uint32_t latestRcReadUs = 0UL;         // A0/A1/A2 pulseIn 3채널을 읽는 데 걸린 시간
 bool controlClockStarted = false;       // 제어 주기 타이머가 시작됐는지 여부
 bool controlTickDue = false;            // 이번 루프에서 제어 처리를 해야 하는지 여부
 bool encoderClockStarted = false;       // 엔코더 샘플링 타이머가 시작됐는지 여부
+uint32_t latestEncoderSampleTimeMs = 0UL;
 bool statusClockStarted = false;        // 상태 출력 타이머가 시작됐는지 여부
+
+void resetRosSpeedControl();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 함수: 조향 캘리브레이션(보정값)이 물리적으로 유효한지 확인
@@ -101,8 +125,6 @@ bool isValidSteeringCalibration() {
 // ─────────────────────────────────────────────────────────────────────────────
 bool validateConfiguration() {
   return BROON_STEERING_CALIBRATION_CONFIRMED &&         // 조향 보정 확인 플래그가 설정됐는지
-         BroonT870::isEstopConfigurationValid(
-             BroonT870Controller::kEstopConfiguration) && // 비상정지 핀 설정이 올바른지
          BroonT870::isRcChannelCalibrationValid(
              BroonT870Controller::kRcSteerCalibration) && // RC 조향 채널 보정값이 올바른지
          BroonT870::isRcThrottleConfigurationValid(
@@ -115,8 +137,11 @@ bool validateConfiguration() {
          BroonT870Controller::countsPerWheelRev > 0.0f && // 바퀴 한 바퀴당 엔코더 카운트가 양수인지
          BroonT870Controller::wheelCircumferenceM > 0.0f && // 바퀴 둘레가 양수인지
          isValidSteeringCalibration() &&                  // 조향 캘리브레이션이 유효한지
-         BroonT870Controller::kSteeringKp > 0.0f &&       // 조향 P제어 이득값이 양수인지
          BroonT870Controller::kSteeringMaximumPwm > 0U && // 조향 최대 PWM이 양수인지
+         BroonT870Controller::kSteeringFullPwmErrorPermille > 0U &&
+         BroonT870Controller::kSteeringFullPwmErrorPermille <= 1000U &&
+         BroonT870Controller::kSteeringEndpointSettleErrorAdc <
+             BroonT870Controller::kSteeringEndpointRestartErrorAdc &&
          BroonT870Controller::kDriveForwardMaxPwm > 0U && // 전진 최대 PWM이 양수인지
          BroonT870Controller::kDriveReverseMaxPwm > 0U;   // 후진 최대 PWM이 양수인지
 }
@@ -197,6 +222,11 @@ void forceAllOutputsOff() {
   analogWrite(BroonT870Controller::kFrontDrivePins.pwm, 0); // 앞 구동 모터 PWM → 0 (정지)
   analogWrite(BroonT870Controller::kRearDrivePins.pwm, 0);  // 뒤 구동 모터 PWM → 0 (정지)
   analogWrite(BroonT870Controller::kSteeringPins.pwm, 0);   // 조향 모터 PWM → 0 (정지)
+  latestSteeringGuardedPwm = 0;
+  latestSteeringAuthorizedPwm = 0;
+  BroonT870::resetSteeringStabilizer(steeringStabilizerState);
+  latestFrontDrivePwm = 0;
+  latestRearDrivePwm = 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -204,7 +234,7 @@ void forceAllOutputsOff() {
 //   fault : 발생한 오류 코드
 //   nowMs : 현재 시각(ms)
 // ─────────────────────────────────────────────────────────────────────────────
-void latchSteeringFault(FaultCode fault, uint32_t nowMs) {
+void latchControllerFault(FaultCode fault, uint32_t nowMs) {
   if (safetyState.latchedFault == FAULT_NONE) {
     safetyState.latchedFault = fault; // 첫 번째 오류만 기록 (나중 오류로 덮어쓰지 않음)
   }
@@ -212,6 +242,9 @@ void latchSteeringFault(FaultCode fault, uint32_t nowMs) {
   outputsAllowed = false;                  // 모든 모터 출력 즉시 금지
   BroonT870::resetSteeringWatchdog(steeringWatchdogState,
                                    latestSteeringAdc, nowMs); // 조향 워치독 초기화
+  BroonT870::resetSpeedPi(rosSpeedPiState);
+  BroonT870::resetDriveFeedbackWatchdog(driveFeedbackWatchdogState);
+  rosSpeedControlPwm = 0;
   forceAllOutputsOff();                    // 모든 모터 즉시 정지
 }
 
@@ -259,8 +292,6 @@ void updateRosCommand(uint32_t nowMs) {
       nowMs,                                             // 현재 시각(ms)
       BroonT870Controller::kRosTimeoutMs,               // ROS 명령 유효 시간 — 이보다 오래됐으면 무시
       BroonT870Controller::kRosMaximumAbsKph,           // ROS가 요청할 수 있는 최대 속도(km/h)
-      BroonT870Controller::kDriveForwardMaxPwm,         // 전진 최대 PWM 한계
-      BroonT870Controller::kDriveReverseMaxPwm,         // 후진 최대 PWM 한계
       BroonT870Controller::kRosMinimumDegrees,          // ROS 조향 최소 각도
       BroonT870Controller::kRosMaximumDegrees,          // ROS 조향 최대 각도
       BroonT870Controller::kSteeringCalibration.leftSafeAdc,  // 왼쪽 안전 ADC값
@@ -275,8 +306,14 @@ void updateRosCommand(uint32_t nowMs) {
 // 함수: RC 조종기 신호를 읽고, 모드 전환 및 최종 실행 명령(activeCommand)을 결정
 // ─────────────────────────────────────────────────────────────────────────────
 void updateInputCommands(uint32_t nowMs, uint32_t nowUs) {
-  const RcSnapshot snapshot =
+  const uint32_t rcReadStartedUs = micros();
+  latestRcSnapshot =
       rcInput.snapshot(nowUs, BroonT870Controller::kRcTimeoutMs); // RC 수신기 신호를 현시각 기준으로 읽기
+  latestRcReadUs = micros() - rcReadStartedUs;
+  const RcSnapshot& snapshot = latestRcSnapshot;
+  rcStopActive = !snapshot.throttleValid ||
+                 snapshot.throttlePulseUs <
+                     BroonT870Controller::kRcStopThresholdUs;
   const bool auxValid =
       snapshot.auxValid && BroonT870::isRcPulseWithinCalibration(
                                snapshot.auxPulseUs,
@@ -288,7 +325,8 @@ void updateInputCommands(uint32_t nowMs, uint32_t nowUs) {
         BroonT870Controller::kAuxRcThresholdUs);  // 이 값 이상이면 RC 모드로 전환
   }
 
-  const bool rcValid = snapshot.steerValid &&   // 조향 채널 신호가 유효하고
+  const bool rcValid = !rcStopActive &&         // throttle-cut이 해제되어 있고
+                        snapshot.steerValid &&   // 조향 채널 신호가 유효하고
                         snapshot.throttleValid && // 스로틀 채널 신호가 유효하고
                         auxValid;                 // AUX 채널 신호가 유효해야 RC 유효
   if (rcValid) {
@@ -303,14 +341,17 @@ void updateInputCommands(uint32_t nowMs, uint32_t nowUs) {
     rcCommand.steerTargetAdc = BroonT870::rcSteerToTargetAdc(
         snapshot.steerPulseUs,                                 // RC 조향 신호 펄스폭(μs)
         BroonT870Controller::kRcSteerCalibration.minimumUs,    // 조향 채널 최솟값(μs)
+        BroonT870Controller::kRcSteerCalibration.centerUs,     // 조향 채널 중앙값(μs)
         BroonT870Controller::kRcSteerCalibration.maximumUs,    // 조향 채널 최댓값(μs)
         BroonT870Controller::kSteeringCalibration.leftSafeAdc, // 왼쪽 안전 ADC값
+        BroonT870Controller::kSteeringCalibration.centerAdc,   // 실제 직진 ADC값
         BroonT870Controller::kSteeringCalibration.rightSafeAdc); // 오른쪽 안전 ADC값 → 목표 ADC값 반환
+    rcCommand.targetSpeedKph = 0.0f;
     rcCommand.receivedAtMs = nowMs;   // 명령 수신 시각 기록
     rcCommand.valid = true;           // RC 명령 유효 표시
     rcCommand.brakeRequested = false; // 브레이크 요청 없음
   } else {
-    rcCommand = {0, 0, MODE_RC, nowMs, false, false}; // RC 신호 없으면 명령 초기화(무효)
+    rcCommand = {0, 0, 0.0f, MODE_RC, nowMs, false, false}; // RC 신호 없으면 명령 초기화(무효)
   }
 
   activeCommand = BroonT870::selectActiveCommand(rcCommand, rosCommand,
@@ -327,28 +368,30 @@ void updateSafety(uint32_t nowMs) {
     return; // 주기가 아니면 아무것도 안 함
   }
 
-  estopActive = BroonT870::estopActiveFromRawLevel(
-      digitalRead(BroonT870Controller::kEstopPin) == HIGH, // E-STOP 핀이 HIGH인지 읽기
-      BroonT870Controller::kEstopConfiguration);            // 핀 레벨 해석 방식 설정 (active-high 또는 active-low)
   const bool throttleNeutral = activeCommand.valid &&
-      BroonT870::signOf(activeCommand.drivePwm) == 0; // 유효한 명령이 있고 스로틀이 0(중립)인지
+      (selectedMode == MODE_ROS
+           ? activeCommand.targetSpeedKph <= 0.0f
+           : BroonT870::signOf(activeCommand.drivePwm) == 0);
   const SafetyInputs inputs = {
       BROON_ENABLE_ACTUATOR_OUTPUTS != 0,         // 빌드 설정에서 출력 허용?
       BROON_STEERING_CALIBRATION_CONFIRMED != 0,  // 조향 보정 확인됨?
       configurationValid,                         // 설정값 전체 유효?
-      estopActive,                                // 비상정지 버튼 눌림?
+      rcStopActive,                               // 조종기 throttle-cut 또는 신호 손실 정지?
       activeCommand.valid,                        // 실행 명령이 유효?
       activeCommand.brakeRequested,               // 브레이크 요청됨?
       throttleNeutral,                            // 스로틀이 중립?
       steeringSensorFault,                        // 조향 센서 오류?
       steeringStallFault,                         // 조향 스톨 오류?
       steeringRuntimeFault,                       // 조향 런타임 오류?
+      driveNoFeedbackFault,                       // 구동 명령 중 엔코더 무응답?
+      driveOverspeedFault,                        // 측정 속도 과속?
       selectedMode,                               // 현재 선택된 모드(RC/ROS)
       BroonT870Controller::kNeutralHoldMs,        // 출발 전 중립 유지 시간 설정
   };
   safetyResult = BroonT870::updateSafetyState(safetyState, inputs, nowMs); // 모든 입력을 종합해 안전 판단
   outputsAllowed = safetyResult.outputsAllowed; // 판단 결과에 따라 출력 허용 여부 업데이트
   if (safetyResult.immediateStop || !outputsAllowed) { // 즉시 정지 명령이거나 출력 금지면
+    if (safetyResult.state == STATE_FAULT_LATCHED) resetRosSpeedControl();
     forceAllOutputsOff(); // 모든 모터 즉시 정지
   }
 }
@@ -363,35 +406,60 @@ void updateSteering(uint32_t nowMs) {
 
   // 이 주기의 모든 안전 판단은 아래 한 번의 ADC 읽기 값으로 수행
   latestSteeringAdc = analogRead(BroonT870Controller::kSteeringSensorPin); // 조향 센서(포텐셔미터) ADC값 읽기
+  if (latestSteeringAdc < minimumSeenSteeringAdc) {
+    minimumSeenSteeringAdc = latestSteeringAdc;
+  }
+  if (latestSteeringAdc > maximumSeenSteeringAdc) {
+    maximumSeenSteeringAdc = latestSteeringAdc;
+  }
   if (latestSteeringAdc < BroonT870Controller::kSteeringElectricalMinAdc || // ADC값이 최솟값보다 작거나
       latestSteeringAdc > BroonT870Controller::kSteeringElectricalMaxAdc) { // 최댓값보다 크면 → 센서 단선/단락 의심
     steeringSensorFault = true;
-    latchSteeringFault(FAULT_STEERING_SENSOR, nowMs); // 센서 오류로 잠금 처리
+    latchControllerFault(FAULT_STEERING_SENSOR, nowMs); // 센서 오류로 잠금 처리
     return;
   }
 
-  const int16_t requestedPwm = BroonT870::computeSteeringPwm(
+  const int16_t requestedPwm = BroonT870::computeNormalizedSteeringPwm(
       activeCommand.steerTargetAdc,                          // 목표 조향 ADC값
       latestSteeringAdc,                                     // 현재 조향 ADC값
-      BroonT870Controller::kSteeringCalibration.adcIncreasesRight, // ADC 증가 방향
-      BroonT870Controller::kSteeringKp,                      // P제어 비례 이득(Kp): 오차가 클수록 세게 움직임
+      BroonT870Controller::kSteeringCalibration.leftSafeAdc, // 왼쪽을 정규화 위치 +1000으로 사용
+      BroonT870Controller::kSteeringCalibration.centerAdc,   // 직진을 정규화 위치 0으로 사용
+      BroonT870Controller::kSteeringCalibration.rightSafeAdc,// 오른쪽을 정규화 위치 -1000으로 사용
       BroonT870Controller::kSteeringDeadbandAdc,             // 이 오차 이내면 모터 구동 안 함(데드밴드)
       BroonT870Controller::kSteeringMinimumPwm,              // 출력 하한값 (너무 약한 PWM은 올림)
-      BroonT870Controller::kSteeringMaximumPwm);             // 출력 상한값 → 요청 PWM 계산
+      BroonT870Controller::kSteeringMaximumPwm,              // 출력 상한값
+      BroonT870Controller::kSteeringFullPwmErrorPermille);   // 전체 조향 범위 중 최대 PWM에 도달할 오차 비율
+
+  const bool endpointTarget = BroonT870::isSteeringEndpointTarget(
+      activeCommand.steerTargetAdc,
+      BroonT870Controller::kSteeringCalibration.leftSafeAdc,
+      BroonT870Controller::kSteeringCalibration.rightSafeAdc,
+      BroonT870Controller::kSteeringEndpointTargetBandAdc);
+  const uint16_t settleErrorAdc =
+      endpointTarget ? BroonT870Controller::kSteeringEndpointSettleErrorAdc
+                     : BroonT870Controller::kSteeringSettleErrorAdc;
+  const uint16_t restartErrorAdc =
+      endpointTarget ? BroonT870Controller::kSteeringEndpointRestartErrorAdc
+                     : BroonT870Controller::kSteeringRestartErrorAdc;
+  const int16_t stabilizedPwm = BroonT870::stabilizeSteeringPwm(
+      steeringStabilizerState, requestedPwm,
+      activeCommand.steerTargetAdc, latestSteeringAdc,
+      settleErrorAdc, restartErrorAdc);
   const BroonT870::SteeringGuardResult guarded = BroonT870::guardSteeringPwm(
-      requestedPwm, latestSteeringAdc,
+      stabilizedPwm, latestSteeringAdc,
       BroonT870Controller::kSteeringCalibration.leftSafeAdc,    // 왼쪽 안전 한계 ADC값
       BroonT870Controller::kSteeringCalibration.rightSafeAdc,   // 오른쪽 안전 한계 ADC값
       BroonT870Controller::kSteeringApproachBandAdc,            // 안전 한계 접근 구간(이 범위 내면 속도 줄임)
       BroonT870Controller::kSteeringMaximumPwm,                 // 최대 PWM
+      BroonT870Controller::kSteeringMinimumPwm,                 // 감속 후에도 유지할 최소 유효 PWM
       BroonT870Controller::kSteeringRecoveryPwm);               // 한계 벗어날 때 복귀 속도 → 가드 적용 PWM 반환
   if (guarded.sensorFault) {          // 가드 계산 중 센서 오류 감지되면
     steeringSensorFault = true;
-    latchSteeringFault(FAULT_STEERING_SENSOR, nowMs);
+    latchControllerFault(FAULT_STEERING_SENSOR, nowMs);
     return;
   }
   if (guarded.configurationFault) {   // 가드 계산 중 설정 오류 감지되면
-    latchSteeringFault(FAULT_CONFIGURATION, nowMs);
+    latchControllerFault(FAULT_CONFIGURATION, nowMs);
     return;
   }
 
@@ -402,21 +470,23 @@ void updateSteering(uint32_t nowMs) {
       outputsAllowed &&                 // 안전 시스템에서 출력 허용?
       !safetyResult.immediateStop;      // 즉시 정지 명령 없음?
   const int16_t authorizedPwm = steeringOutputAuthorized ? guardedPwm : 0; // 허가됐으면 guardedPwm, 아니면 0
+  latestSteeringGuardedPwm = guardedPwm;
+  latestSteeringAuthorizedPwm = authorizedPwm;
   const BroonT870::SteeringWatchdogResult watchdog =
       BroonT870::updateSteeringWatchdog(
           steeringWatchdogState, latestSteeringAdc, authorizedPwm,
           BroonT870Controller::kSteeringProgressDeltaAdc, // 이만큼 변해야 "움직이고 있다"고 인정
           BroonT870Controller::kSteeringNoProgressMs,     // 이 시간 동안 움직임 없으면 스톨 오류
-          BroonT870Controller::kSteeringMaxDriveMs,       // 최대 연속 구동 허용 시간
+          BroonT870Controller::kSteeringMaxDriveMs,       // 최대 연속 구동 시간(0이면 fault 4 비활성)
           nowMs);                                         // → 워치독 결과 반환
   if (watchdog.stallFault) {           // 모터가 막혀서 못 움직이는 스톨 감지되면
     steeringStallFault = true;
-    latchSteeringFault(FAULT_STEERING_STALL, nowMs);
+    latchControllerFault(FAULT_STEERING_STALL, nowMs);
     return;
   }
   if (watchdog.runtimeFault) {         // 너무 오래 구동한 런타임 오류 감지되면
     steeringRuntimeFault = true;
-    latchSteeringFault(FAULT_STEERING_RUNTIME, nowMs);
+    latchControllerFault(FAULT_STEERING_RUNTIME, nowMs);
     return;
   }
 
@@ -432,16 +502,21 @@ void updateDrive(uint32_t nowMs) {
   if (!controlTickDue) {
     return; // 제어 주기가 아니면 아무것도 안 함
   }
+  const int16_t requestedDrivePwm =
+      selectedMode == MODE_ROS ? rosSpeedControlPwm : activeCommand.drivePwm;
+  latestDriveRequestedPwm = requestedDrivePwm;
   const DrivePairResult pair = BroonT870::updateDrivePair(
       drivePairState,                                   // 앞/뒤 구동 내부 상태
-      activeCommand.drivePwm,                           // 요청된 목표 PWM값
+      requestedDrivePwm,                                // RC PWM 또는 ROS PI 결과
       BroonT870Controller::kDriveForwardMaxPwm,         // 전진 최대 PWM 한계
       BroonT870Controller::kDriveReverseMaxPwm,         // 후진 최대 PWM 한계
-      BroonT870Controller::kFrontDriveRampStep,         // 앞모터 한 주기당 최대 PWM 변화량(급가속 방지)
-      BroonT870Controller::kRearDriveRampStep,          // 뒷모터 한 주기당 최대 PWM 변화량(급가속 방지)
+      BroonT870Controller::kDriveAccelerationRampStep,  // 가속 시 한 주기당 PWM 변화량
+      BroonT870Controller::kDriveDecelerationRampStep,  // 감속 시 한 주기당 PWM 변화량
       BroonT870Controller::kDirectionInterlockMs,       // 방향 전환 시 정지 대기 시간(기계 충격 방지)
       nowMs,                                            // 현재 시각
       safetyResult.immediateStop || !outputsAllowed);   // 즉시 정지 필요? → 앞/뒤 모터 PWM 계산 결과 반환
+  latestFrontDrivePwm = pair.frontPwm;
+  latestRearDrivePwm = pair.rearPwm;
   writeMotor(BroonT870Controller::kFrontDrivePins, frontMotorOutputState,
              pair.frontPwm,                                       // 계산된 앞 모터 PWM
              BroonT870Controller::kFrontDriveDirectionInverted);  // 필요시 방향 반전
@@ -453,15 +528,15 @@ void updateDrive(uint32_t nowMs) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 함수: 앞바퀴 엔코더로 RPM과 속도(m/s)를 주기적으로 계산
 // ─────────────────────────────────────────────────────────────────────────────
-void updateFrontEncoderMeasurement(uint32_t nowMs) {
+bool updateFrontEncoderMeasurement(uint32_t nowMs) {
   if (!encoderClockStarted) {
     lastEncoderSampleMs = nowMs; // 첫 실행 시 기준 시각 설정
     encoderClockStarted = true;
-    return;
+    return false;
   }
   if (!BroonT870::hasElapsed(nowMs, lastEncoderSampleMs,
                               BroonT870Controller::kEncoderSampleIntervalMs)) {
-    return; // 샘플링 주기가 아직 안 됐으면 패스
+    return false; // 샘플링 주기가 아직 안 됐으면 패스
   }
   const uint32_t sampleTimeMs = nowMs - lastEncoderSampleMs; // 이번 샘플링 간격(ms)
   const long currentCount = atomicFrontEncoderCount();        // 현재 엔코더 총 카운트 (안전하게 읽기)
@@ -475,10 +550,77 @@ void updateFrontEncoderMeasurement(uint32_t nowMs) {
   frontEncoderMeasurement.speedMps = BroonT870::speedMpsFromRpm(
       frontEncoderMeasurement.rpm,                            // 분당 회전수(RPM)
       BroonT870Controller::wheelCircumferenceM);              // 바퀴 둘레(m) → 속도(m/s) 계산
+  measuredAbsoluteKph = frontEncoderMeasurement.speedMps * 3.6f;
+  if (measuredAbsoluteKph < 0.0f) measuredAbsoluteKph = -measuredAbsoluteKph;
   frontEncoderMeasurement.calibrated =
       BroonT870Controller::countsPerWheelRev > 0.0f &&        // 바퀴당 카운트가 설정됐고
       BroonT870Controller::wheelCircumferenceM > 0.0f;        // 바퀴 둘레가 설정된 경우에만 보정됨 표시
+  latestEncoderSampleTimeMs = sampleTimeMs;
   lastEncoderSampleMs = nowMs; // 다음 주기 계산을 위해 현재 시각 저장
+  return true;
+}
+
+void resetRosSpeedControl() {
+  BroonT870::resetSpeedPi(rosSpeedPiState);
+  BroonT870::resetDriveFeedbackWatchdog(driveFeedbackWatchdogState);
+  rosSpeedControlPwm = 0;
+}
+
+void updateRosSpeedControl(uint32_t nowMs, bool encoderMeasurementUpdated) {
+  const bool driveOutputAuthorized =
+      BROON_ENABLE_ACTUATOR_OUTPUTS != 0 && outputsAllowed &&
+      !safetyResult.immediateStop;
+  if (encoderMeasurementUpdated && selectedMode == MODE_ROS &&
+      driveOutputAuthorized) {
+    BroonT870::DriveFeedbackWatchdogState overspeedOnlyState = {0UL, false};
+    const BroonT870::DriveFeedbackWatchdogResult overspeedCheck =
+        BroonT870::updateDriveFeedbackWatchdog(
+            overspeedOnlyState, 0.0f, measuredAbsoluteKph,
+            frontEncoderMeasurement.deltaCount, 0,
+            BroonT870Controller::kDriveFeedbackMinimumPwm,
+            BroonT870Controller::kDriveNoFeedbackTimeoutMs,
+            BroonT870Controller::kDriveOverspeedLimitKph, nowMs);
+    if (overspeedCheck.overspeedFault) {
+      driveOverspeedFault = true;
+      latchControllerFault(FAULT_DRIVE_OVERSPEED, nowMs);
+      return;
+    }
+  }
+  const bool commandCanDrive =
+      selectedMode == MODE_ROS && activeCommand.valid && !rcStopActive &&
+      !activeCommand.brakeRequested && activeCommand.targetSpeedKph > 0.0f;
+  if (!commandCanDrive) {
+    resetRosSpeedControl();
+    return;
+  }
+  if (!encoderMeasurementUpdated) return;
+
+  const BroonT870::SpeedPiResult piResult = BroonT870::updateSpeedPi(
+      rosSpeedPiState, activeCommand.targetSpeedKph, measuredAbsoluteKph,
+      BroonT870Controller::kRosSpeedKp, BroonT870Controller::kRosSpeedKi,
+      BroonT870Controller::kRosSpeedDeadbandKph,
+      BroonT870Controller::kRosTargetRampKphPerSecond,
+      BroonT870Controller::kDriveForwardMaxPwm, latestEncoderSampleTimeMs);
+  rosSpeedControlPwm = piResult.pwm;
+
+  if (!driveOutputAuthorized) {
+    BroonT870::resetDriveFeedbackWatchdog(driveFeedbackWatchdogState);
+    return;
+  }
+  const BroonT870::DriveFeedbackWatchdogResult watchdog =
+      BroonT870::updateDriveFeedbackWatchdog(
+          driveFeedbackWatchdogState, activeCommand.targetSpeedKph,
+          measuredAbsoluteKph, frontEncoderMeasurement.deltaCount,
+          rosSpeedControlPwm, BroonT870Controller::kDriveFeedbackMinimumPwm,
+          BroonT870Controller::kDriveNoFeedbackTimeoutMs,
+          BroonT870Controller::kDriveOverspeedLimitKph, nowMs);
+  if (watchdog.noFeedbackFault) {
+    driveNoFeedbackFault = true;
+    latchControllerFault(FAULT_DRIVE_NO_FEEDBACK, nowMs);
+  } else if (watchdog.overspeedFault) {
+    driveOverspeedFault = true;
+    latchControllerFault(FAULT_DRIVE_OVERSPEED, nowMs);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -501,16 +643,39 @@ void publishOrPrintStatus(uint32_t nowMs) {
                              safetyResult.immediateStop ||   // 즉시 정지 명령이거나
                              !outputsAllowed;                 // 출력 금지이면 → 정지 상태
   rosBridge.publishFeedback(frontEncoderMeasurement, latestSteeringAdc,
-                            estopActive, stopRequested);     // 엔코더, 조향ADC, E-STOP 상태를 ROS로 전송
+                            rcStopActive, stopRequested);    // 엔코더, 조향ADC, RC 정지 상태를 ROS로 전송
 #else // 일반(사람용) 시리얼 모드
   Serial.print(F("state="));
   Serial.print(static_cast<uint8_t>(safetyResult.state));   // 현재 안전 상태 숫자 출력
   Serial.print(F(" fault="));
   Serial.print(static_cast<uint8_t>(safetyResult.activeFault)); // 현재 활성 오류 코드 숫자 출력
-  Serial.print(F(" encoder="));
-  Serial.print(frontEncoderMeasurement.totalCount);          // 총 엔코더 카운트 출력
-  Serial.print(F(" steer_adc="));
-  Serial.println(latestSteeringAdc);                         // 현재 조향 ADC값 출력 후 줄바꿈
+  Serial.print(F(" mode="));
+  Serial.print(selectedMode == MODE_ROS ? F("ROS") : F("RC"));
+  Serial.print(F(" stop="));
+  Serial.print(rcStopActive ? 1 : 0);
+  Serial.print(F(" rc_s="));
+  Serial.print(latestRcSnapshot.steerPulseUs);
+  Serial.print(latestRcSnapshot.steerValid ? F("V") : F("X"));
+  Serial.print(F(" rc_t="));
+  Serial.print(latestRcSnapshot.throttlePulseUs);
+  Serial.print(latestRcSnapshot.throttleValid ? F("V") : F("X"));
+  Serial.print(F(" drive="));
+  Serial.print(latestDriveRequestedPwm);
+  Serial.print('/');
+  Serial.print(latestFrontDrivePwm);
+  Serial.print('/');
+  Serial.print(latestRearDrivePwm);
+  Serial.print(F(" steer="));
+  Serial.print(activeCommand.steerTargetAdc);
+  Serial.print('/');
+  Serial.print(latestSteeringAdc);
+  Serial.print('/');
+  Serial.print(latestSteeringAuthorizedPwm);
+  Serial.print(F(" kph="));
+  Serial.print(measuredAbsoluteKph, 2);
+  Serial.print(F(" read_us="));
+  Serial.print(latestRcReadUs);
+  Serial.println();
 #endif
 #else
   (void)nowMs; // ROS도 시리얼도 꺼져있으면 아무것도 안 함 (nowMs 미사용 경고 억제)
@@ -534,10 +699,11 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(BroonT870Controller::kFrontEncoderBPin),
                   frontEncoderBIsr, CHANGE); // B핀 신호 변화(CHANGE) 시 frontEncoderBIsr 자동 호출 등록
 
-  pinMode(BroonT870Controller::kEstopPin, INPUT_PULLUP);        // 비상정지(E-STOP) 핀을 입력 모드로
   pinMode(BroonT870Controller::kStatusLedPin, OUTPUT);          // 상태 표시 LED 핀을 출력 모드로
   digitalWrite(BroonT870Controller::kStatusLedPin, LOW);        // 상태 LED 꺼짐으로 시작
-  rcInput.begin();                                              // RC 수신기 신호 수신 시작
+  rcInput.begin(BroonT870Controller::kRcSteerPin,
+                BroonT870Controller::kRcThrottlePin,
+                BroonT870Controller::kRcAuxPin);                // Uno A0/A1/A2 RC 신호 수신 시작
   BroonT870::resetDrivePair(drivePairState, millis());          // 구동 내부 상태 초기화 (방향 인터락 타이머 등)
   safetyState  = {STATE_BOOT_LOCKED, FAULT_NONE, 0UL, false};   // 안전 상태를 "부팅 잠금"으로 초기화
   safetyResult = {STATE_BOOT_LOCKED, FAULT_NONE, false, true};  // 안전 결과도 "부팅 잠금" 상태로 초기화
@@ -562,9 +728,10 @@ void loop() {
   const uint32_t nowUs = micros();           // 현재 시각 읽기 (아두이노 부팅 후 경과 마이크로초)
   updateRosCommand(nowMs);                   // ① ROS 컴퓨터 명령 최신값으로 업데이트
   updateInputCommands(nowMs, nowUs);         // ② RC/ROS 입력을 파싱해 실행할 명령 결정
-  updateSafety(nowMs);                       // ③ 안전 상태 판단 및 모터 출력 허용 여부 결정
-  updateSteering(nowMs);                     // ④ 조향 모터 P제어 및 안전 가드 적용
-  updateDrive(nowMs);                        // ⑤ 앞/뒤 구동 모터 출력 계산 및 적용
-  updateFrontEncoderMeasurement(nowMs);      // ⑥ 앞바퀴 엔코더로 속도·RPM 계산
-  publishOrPrintStatus(nowMs);               // ⑦ 현재 상태를 ROS 또는 시리얼 모니터로 출력
+  const bool encoderUpdated = updateFrontEncoderMeasurement(nowMs); // ③ 속도 측정
+  updateRosSpeedControl(nowMs, encoderUpdated); // ④ ROS 목표속도 PI 제어
+  updateSafety(nowMs);                       // ⑤ 안전 상태 판단 및 모터 출력 허용 여부 결정
+  updateSteering(nowMs);                     // ⑥ 조향 모터 P제어 및 안전 가드 적용
+  updateDrive(nowMs);                        // ⑦ 앞/뒤 구동 모터 출력 계산 및 적용
+  publishOrPrintStatus(nowMs);               // ⑧ 현재 상태를 ROS 또는 시리얼 모니터로 출력
 }

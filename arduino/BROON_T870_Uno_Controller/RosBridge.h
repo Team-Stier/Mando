@@ -9,7 +9,7 @@
 #include <erp42_msgs/DriveCmd.h>
 #include <erp42_msgs/SerialFeedBack.h>
 
-#include <BroonT870Core.h>
+#include "BroonT870Core.h"
 
 namespace BroonT870Controller {
 
@@ -69,11 +69,10 @@ class RosBridge {
 
   BroonT870::VehicleCommand vehicleCommand(
       uint32_t nowMs, uint16_t timeoutMs, int16_t maximumAbsKph,
-      uint8_t forwardMaximumPwm, uint8_t reverseMaximumPwm,
       int16_t minimumDegrees, int16_t maximumDegrees, int16_t leftAdc,
       int16_t centerAdc, int16_t rightAdc) const {
-    BroonT870::VehicleCommand command = {0, 0, BroonT870::MODE_ROS, nowMs,
-                                         false, false};
+    BroonT870::VehicleCommand command = {0, 0, 0.0f, BroonT870::MODE_ROS,
+                                         nowMs, false, false};
     if (!receipt_.received ||
         BroonT870::hasElapsed(nowMs, receipt_.receivedAtMs, timeoutMs)) {
       return command;
@@ -89,9 +88,7 @@ class RosBridge {
         receipt_.kph > static_cast<uint16_t>(maximumAbsKph)
             ? static_cast<uint16_t>(maximumAbsKph)
             : receipt_.kph;
-    command.drivePwm = BroonT870::kphToSignedPwm(
-        static_cast<int16_t>(limitedKph), maximumAbsKph, forwardMaximumPwm,
-        reverseMaximumPwm);
+    command.targetSpeedKph = static_cast<float>(limitedKph);
     command.steerTargetAdc = BroonT870::degreesToSteerAdc(
         receipt_.degrees, minimumDegrees, maximumDegrees, leftAdc, centerAdc,
         rightAdc);
@@ -102,10 +99,10 @@ class RosBridge {
   }
 
   void publishFeedback(const BroonT870::EncoderMeasurement& frontEncoder,
-                        int16_t steeringAdc, bool estopActive,
+                        int16_t steeringAdc, bool remoteStopActive,
                         bool stopRequested) {
     const BroonT870::FeedbackStatus status = BroonT870::nextFeedbackStatus(
-        estopActive, stopRequested, aliveCounter_);
+        remoteStopActive, stopRequested, aliveCounter_);
     aliveCounter_ = status.alive;
     feedbackMessage_.EStop = status.estop;
     feedbackMessage_.speed = frontEncoder.speedMps;
