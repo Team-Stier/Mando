@@ -18,8 +18,7 @@ enum FaultCode : uint8_t {
   FAULT_STEERING_SENSOR = 2,
   FAULT_STEERING_STALL = 3,
   FAULT_STEERING_RUNTIME = 4,
-  FAULT_DRIVE_NO_FEEDBACK = 5,
-  FAULT_DRIVE_OVERSPEED = 6
+  FAULT_DRIVE_NO_FEEDBACK = 5
 };
 
 struct RcChannelCalibration {
@@ -66,7 +65,6 @@ struct SafetyInputs {
   bool steeringStallFault;
   bool steeringRuntimeFault;
   bool driveNoFeedbackFault;
-  bool driveOverspeedFault;
   ControlMode selectedMode;
   uint16_t neutralHoldMs;
 };
@@ -152,7 +150,6 @@ struct DriveFeedbackWatchdogState {
 
 struct DriveFeedbackWatchdogResult {
   bool noFeedbackFault;
-  bool overspeedFault;
 };
 
 struct FeedbackStatus {
@@ -261,12 +258,13 @@ SpeedPiResult updateSpeedPi(SpeedPiState& state, float requestedKph,
                             float targetRampKphPerSecond,
                             uint8_t minimumPwm, uint8_t maximumPwm,
                             uint32_t sampleTimeMs);
+bool isSpeedAboveCeiling(float measuredAbsoluteKph, float ceilingKph);
 void resetDriveFeedbackWatchdog(DriveFeedbackWatchdogState& state);
 DriveFeedbackWatchdogResult updateDriveFeedbackWatchdog(
-    DriveFeedbackWatchdogState& state, float targetKph,
-    float measuredAbsoluteKph, long encoderDeltaCount, int16_t appliedPwm,
+    DriveFeedbackWatchdogState& state, float targetKph, long encoderDeltaCount,
+    int16_t appliedPwm,
     uint8_t minimumMonitoredPwm, uint16_t noFeedbackTimeoutMs,
-    float overspeedLimitKph, uint32_t nowMs);
+    uint32_t nowMs);
 FeedbackStatus nextFeedbackStatus(bool remoteStopActive, bool stopRequested,
                                   uint8_t previousAlive);
 

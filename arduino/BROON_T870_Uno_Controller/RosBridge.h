@@ -68,7 +68,7 @@ class RosBridge {
   }
 
   BroonT870::VehicleCommand vehicleCommand(
-      uint32_t nowMs, uint16_t timeoutMs, int16_t maximumAbsKph,
+      uint32_t nowMs, uint16_t timeoutMs, uint16_t maximumTargetKph,
       int16_t minimumDegrees, int16_t maximumDegrees, int16_t leftAdc,
       int16_t centerAdc, int16_t rightAdc) const {
     BroonT870::VehicleCommand command = {0, 0, 0.0f, BroonT870::MODE_ROS,
@@ -77,7 +77,7 @@ class RosBridge {
         BroonT870::hasElapsed(nowMs, receipt_.receivedAtMs, timeoutMs)) {
       return command;
     }
-    if (maximumAbsKph <= 0) {
+    if (maximumTargetKph == 0U) {
       return command;
     }
 
@@ -85,8 +85,8 @@ class RosBridge {
     // Do not reinterpret it as a reverse request without an upstream gear
     // policy. The pure mapper remains signed for future signed interfaces.
     const uint16_t limitedKph =
-        receipt_.kph > static_cast<uint16_t>(maximumAbsKph)
-            ? static_cast<uint16_t>(maximumAbsKph)
+        receipt_.kph > maximumTargetKph
+            ? maximumTargetKph
             : receipt_.kph;
     command.targetSpeedKph = static_cast<float>(limitedKph);
     command.steerTargetAdc = BroonT870::degreesToSteerAdc(
