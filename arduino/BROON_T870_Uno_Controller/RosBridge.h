@@ -99,11 +99,13 @@ class RosBridge {
   }
 
   void publishFeedback(const BroonT870::EncoderMeasurement& frontEncoder,
-                        int16_t steeringAdc, bool remoteStopActive,
-                        bool stopRequested) {
+                        int16_t steeringAdc, BroonT870::ControlMode controlMode,
+                        bool remoteStopActive, bool stopRequested) {
     const BroonT870::FeedbackStatus status = BroonT870::nextFeedbackStatus(
         remoteStopActive, stopRequested, aliveCounter_);
     aliveCounter_ = status.alive;
+    feedbackMessage_.MorA =
+        controlMode == BroonT870::MODE_ROS ? 1U : 0U;
     feedbackMessage_.EStop = status.estop;
     feedbackMessage_.speed = frontEncoder.speedMps;
     feedbackMessage_.steer = static_cast<float>(steeringAdc);

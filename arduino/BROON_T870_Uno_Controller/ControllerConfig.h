@@ -47,14 +47,16 @@ constexpr float wheelCircumferenceM = 0.84823f;
 constexpr SteeringCalibration kSteeringCalibration = {1020, 1020, 600, 180,
                                                        180, false};
 
-// Values transferred from the reference T870 sketch. RC wiring is unchanged:
-// steering=A0, throttle=A1, mode/AUX=A2.
+// RC wiring: steering=A0, throttle=A1, mode/AUX=A2. Steering and throttle
+// values came from the reference sketch; AUX endpoints were measured on the
+// installed DX3. Its observed 1090/1450/1890 us positions are accepted with
+// margin so normal pulse jitter does not invalidate either endpoint.
 constexpr BroonT870::RcChannelCalibration kRcSteerCalibration = {1100, 1450,
                                                                   1800};
 constexpr BroonT870::RcChannelCalibration kRcThrottleCalibration = {
     1050, 1450, 1850};
-constexpr BroonT870::RcChannelCalibration kRcAuxCalibration = {1100, 1450,
-                                                                1800};
+constexpr BroonT870::RcChannelCalibration kRcAuxCalibration = {1050, 1450,
+                                                                1930};
 constexpr uint16_t kRcThrottleDeadbandUs = 40U;
 // The transmitter's throttle-cut position produces a pulse below this value.
 // A missing throttle signal is also treated as an active remote stop.
@@ -74,8 +76,11 @@ constexpr float kRosSpeedKp = 20.0f;
 constexpr float kRosSpeedKi = 8.0f;
 constexpr float kRosSpeedDeadbandKph = 0.12f;
 constexpr float kRosTargetRampKphPerSecond = 1.0f;
+constexpr uint8_t kRosDriveMinimumPwm = 80U;
 constexpr uint8_t kDriveFeedbackMinimumPwm = 60U;
-constexpr uint16_t kDriveNoFeedbackTimeoutMs = 1500U;
+// Disabled for the current topic/bench test while the front encoder path is
+// not yet verified. Overspeed monitoring remains active.
+constexpr uint16_t kDriveNoFeedbackTimeoutMs = 0U;
 constexpr float kDriveOverspeedLimitKph = 4.0f;
 constexpr uint16_t kNeutralHoldMs = 500U;
 constexpr uint16_t kDirectionInterlockMs = 300U;
@@ -88,17 +93,17 @@ constexpr int16_t kSteeringElectricalMinAdc = 1;
 constexpr int16_t kSteeringElectricalMaxAdc = 1022;
 constexpr uint16_t kSteeringApproachBandAdc = 100U;
 constexpr uint8_t kSteeringRecoveryPwm = 60U;
-constexpr uint8_t kSteeringMinimumPwm = 60U;
-constexpr uint8_t kSteeringMaximumPwm = 200U;
-constexpr uint16_t kSteeringFullPwmErrorPermille = 250U;
+constexpr uint8_t kSteeringMinimumPwm = 100U;
+constexpr uint8_t kSteeringMaximumPwm = 210U;
+constexpr uint16_t kSteeringFullPwmErrorPermille = 100U;
 constexpr uint8_t kSteeringDeadbandAdc = 8U;
 constexpr uint16_t kSteeringSettleErrorAdc = 5U;
 constexpr uint16_t kSteeringRestartErrorAdc = 18U;
 constexpr uint16_t kSteeringEndpointTargetBandAdc = 5U;
 constexpr uint16_t kSteeringEndpointSettleErrorAdc = 25U;
 constexpr uint16_t kSteeringEndpointRestartErrorAdc = 60U;
-constexpr uint8_t kDriveForwardMaxPwm = 80U;
-constexpr uint8_t kDriveReverseMaxPwm = 80U;
+constexpr uint8_t kDriveForwardMaxPwm = 200U;
+constexpr uint8_t kDriveReverseMaxPwm = 200U;
 constexpr uint8_t kDriveAccelerationRampStep = 10U;
 constexpr uint8_t kDriveDecelerationRampStep = 20U;
 

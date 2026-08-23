@@ -142,6 +142,8 @@ bool validateConfiguration() {
          BroonT870Controller::kSteeringFullPwmErrorPermille <= 1000U &&
          BroonT870Controller::kSteeringEndpointSettleErrorAdc <
              BroonT870Controller::kSteeringEndpointRestartErrorAdc &&
+         BroonT870Controller::kRosDriveMinimumPwm <=
+             BroonT870Controller::kDriveForwardMaxPwm &&
          BroonT870Controller::kDriveForwardMaxPwm > 0U && // 전진 최대 PWM이 양수인지
          BroonT870Controller::kDriveReverseMaxPwm > 0U;   // 후진 최대 PWM이 양수인지
 }
@@ -600,6 +602,7 @@ void updateRosSpeedControl(uint32_t nowMs, bool encoderMeasurementUpdated) {
       BroonT870Controller::kRosSpeedKp, BroonT870Controller::kRosSpeedKi,
       BroonT870Controller::kRosSpeedDeadbandKph,
       BroonT870Controller::kRosTargetRampKphPerSecond,
+      BroonT870Controller::kRosDriveMinimumPwm,
       BroonT870Controller::kDriveForwardMaxPwm, latestEncoderSampleTimeMs);
   rosSpeedControlPwm = piResult.pwm;
 
@@ -643,7 +646,8 @@ void publishOrPrintStatus(uint32_t nowMs) {
                              safetyResult.immediateStop ||   // 즉시 정지 명령이거나
                              !outputsAllowed;                 // 출력 금지이면 → 정지 상태
   rosBridge.publishFeedback(frontEncoderMeasurement, latestSteeringAdc,
-                            rcStopActive, stopRequested);    // 엔코더, 조향ADC, RC 정지 상태를 ROS로 전송
+                            selectedMode, rcStopActive,
+                            stopRequested);    // 모드, 엔코더, 조향ADC, RC 정지 상태를 ROS로 전송
 #else // 일반(사람용) 시리얼 모드
   Serial.print(F("state="));
   Serial.print(static_cast<uint8_t>(safetyResult.state));   // 현재 안전 상태 숫자 출력

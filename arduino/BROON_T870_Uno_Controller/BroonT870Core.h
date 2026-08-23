@@ -259,7 +259,8 @@ SpeedPiResult updateSpeedPi(SpeedPiState& state, float requestedKph,
                             float measuredKph, float kp, float ki,
                             float deadbandKph,
                             float targetRampKphPerSecond,
-                            uint8_t maximumPwm, uint32_t sampleTimeMs);
+                            uint8_t minimumPwm, uint8_t maximumPwm,
+                            uint32_t sampleTimeMs);
 void resetDriveFeedbackWatchdog(DriveFeedbackWatchdogState& state);
 DriveFeedbackWatchdogResult updateDriveFeedbackWatchdog(
     DriveFeedbackWatchdogState& state, float targetKph,

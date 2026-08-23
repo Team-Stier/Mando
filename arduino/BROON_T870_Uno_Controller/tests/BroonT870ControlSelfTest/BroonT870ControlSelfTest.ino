@@ -1,12 +1,12 @@
 #include <Arduino.h>
 
-#include <BroonT870Core.h>
-#include <ControllerConfig.h>
+#include "BroonT870Core.h"
+#include "ControllerConfig.h"
 
-static_assert(BroonT870Controller::kSteeringMinimumPwm == 60U,
-              "steering minimum PWM must provide breakaway force");
-static_assert(BroonT870Controller::kSteeringMaximumPwm == 200U,
-              "steering maximum PWM must be 200");
+static_assert(BroonT870Controller::kSteeringMinimumPwm == 100U,
+              "steering minimum PWM must match the current response tuning");
+static_assert(BroonT870Controller::kSteeringMaximumPwm == 210U,
+              "steering maximum PWM must match the current response tuning");
 static_assert(BroonT870Controller::kSteeringRecoveryPwm == 60U,
               "steering recovery PWM must provide breakaway force");
 static_assert(BroonT870Controller::kSteeringProgressDeltaAdc == 2U,
@@ -22,8 +22,15 @@ static_assert(
         BroonT870Controller::kSteeringCalibration.rightSafeAdc == 180 &&
         BroonT870Controller::kSteeringCalibration.rightMechanicalAdc == 180,
     "steering calibration must use the newly measured full range");
-static_assert(BroonT870Controller::kSteeringFullPwmErrorPermille == 250U,
-              "steering must reach full PWM near 105 ADC error");
+static_assert(BroonT870Controller::kSteeringFullPwmErrorPermille == 100U,
+              "steering must reach full PWM near ten percent position error");
+static_assert(BroonT870Controller::kRosDriveMinimumPwm == 80U,
+              "ROS positive PI output must preserve drive breakaway PWM");
+static_assert(BroonT870Controller::kDriveForwardMaxPwm == 200U &&
+                  BroonT870Controller::kDriveReverseMaxPwm == 200U,
+              "drive limits must match the current bench setting");
+static_assert(BroonT870Controller::kDriveNoFeedbackTimeoutMs == 0U,
+              "drive no-feedback fault must be disabled for bench testing");
 static_assert(BroonT870Controller::kDriveAccelerationRampStep == 10U,
               "drive acceleration must respond in ten-PWM steps");
 static_assert(BroonT870Controller::kDriveDecelerationRampStep == 20U,
@@ -142,37 +149,42 @@ void testSpeedPiController() {
   expectNear(F("PI reset target"), state.rampedTargetKph, 0.0f, 0.001f);
 
   BroonT870::SpeedPiResult result = BroonT870::updateSpeedPi(
-      state, 3.0f, 0.0f, 20.0f, 0.0f, 0.0f, 1.0f, 80U, 100UL);
+      state, 3.0f, 0.0f, 20.0f, 0.0f, 0.0f, 1.0f, 0U, 80U, 100UL);
   expectNear(F("PI target ramp"), result.rampedTargetKph, 0.1f, 0.001f);
   expectEqual(F("PI proportional output"), result.pwm, 2);
 
   state = {0.0f, 3.0f};
   result = BroonT870::updateSpeedPi(state, 3.0f, 0.0f, 100.0f, 0.0f,
-                                    0.0f, 1.0f, 80U, 100UL);
+                                    0.0f, 1.0f, 0U, 80U, 100UL);
   expectEqual(F("PI maximum clamp"), result.pwm, 80);
 
   state = {0.0f, 1.0f};
   result = BroonT870::updateSpeedPi(state, 1.0f, 2.0f, 20.0f, 0.0f,
-                                    0.0f, 1.0f, 80U, 100UL);
+                                    0.0f, 1.0f, 0U, 80U, 100UL);
   expectEqual(F("PI nonnegative output"), result.pwm, 0);
 
   state = {0.0f, 1.0f};
   result = BroonT870::updateSpeedPi(state, 1.0f, 0.5f, 0.0f, 20.0f,
-                                    0.0f, 1.0f, 80U, 1000UL);
+                                    0.0f, 1.0f, 0U, 80U, 1000UL);
   expectNear(F("PI integral accumulation"), state.integralPwm, 10.0f,
              0.001f);
   expectEqual(F("PI integral output"), result.pwm, 10);
 
   state = {30.0f, 3.0f};
   result = BroonT870::updateSpeedPi(state, 3.0f, 0.0f, 100.0f, 20.0f,
-                                    0.0f, 1.0f, 80U, 1000UL);
+                                    0.0f, 1.0f, 0U, 80U, 1000UL);
   expectNear(F("PI anti windup"), state.integralPwm, 30.0f, 0.001f);
   expectEqual(F("PI saturated output"), result.pwm, 80);
 
   result = BroonT870::updateSpeedPi(state, 0.0f, 1.0f, 20.0f, 8.0f,
-                                    0.12f, 1.0f, 80U, 100UL);
+                                    0.12f, 1.0f, 0U, 80U, 100UL);
   expectEqual(F("PI zero target output"), result.pwm, 0);
   expectNear(F("PI zero target reset"), state.integralPwm, 0.0f, 0.001f);
+
+  state = {0.0f, 0.0f};
+  result = BroonT870::updateSpeedPi(state, 1.0f, 0.0f, 20.0f, 0.0f,
+                                    0.0f, 1.0f, 80U, 200U, 100UL);
+  expectEqual(F("PI positive output minimum"), result.pwm, 80);
 }
 
 void testDriveFeedbackWatchdog() {
@@ -233,21 +245,21 @@ void testMeasuredCalibrationAndSteeringLimits() {
   expectEqual(F("normalized right endpoint"),
               BroonT870::steeringPositionPermille(180, 1020, 600, 180),
               -1000);
-  expectEqual(F("steering reaches full PWM at 105 ADC left error"),
+  expectEqual(F("steering reaches full PWM at 42 ADC left error"),
               BroonT870::computeNormalizedSteeringPwm(
-                  705, 600, 1020, 600, 180, 8U, 60U, 200U, 250U),
-              -200);
-  expectEqual(F("steering reaches full PWM at 105 ADC right error"),
+                  642, 600, 1020, 600, 180, 8U, 100U, 210U, 100U),
+              -210);
+  expectEqual(F("steering reaches full PWM at 42 ADC right error"),
               BroonT870::computeNormalizedSteeringPwm(
-                  495, 600, 1020, 600, 180, 8U, 60U, 200U, 250U),
-              200);
+                  558, 600, 1020, 600, 180, 8U, 100U, 210U, 100U),
+              210);
   expectEqual(F("steering proportional below early saturation"),
               BroonT870::computeNormalizedSteeringPwm(
-                  670, 600, 1020, 600, 180, 8U, 60U, 200U, 250U),
-              -152);
+                  621, 600, 1020, 600, 180, 8U, 100U, 210U, 100U),
+              -155);
   expectEqual(F("steering deadband"),
               BroonT870::computeNormalizedSteeringPwm(
-                  607, 600, 1020, 600, 180, 8U, 60U, 200U, 250U),
+                  607, 600, 1020, 600, 180, 8U, 100U, 210U, 100U),
               0);
 
   BroonT870::SteeringGuardResult guard =

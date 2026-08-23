@@ -575,10 +575,11 @@ SpeedPiResult updateSpeedPi(SpeedPiState& state, float requestedKph,
                             float measuredKph, float kp, float ki,
                             float deadbandKph,
                             float targetRampKphPerSecond,
-                            uint8_t maximumPwm, uint32_t sampleTimeMs) {
+                            uint8_t minimumPwm, uint8_t maximumPwm,
+                            uint32_t sampleTimeMs) {
   if (requestedKph <= 0.0f || kp < 0.0f || ki < 0.0f ||
       deadbandKph < 0.0f || targetRampKphPerSecond <= 0.0f ||
-      maximumPwm == 0U || sampleTimeMs == 0UL) {
+      maximumPwm == 0U || minimumPwm > maximumPwm || sampleTimeMs == 0UL) {
     resetSpeedPi(state);
     return {0, 0.0f};
   }
@@ -609,6 +610,8 @@ SpeedPiResult updateSpeedPi(SpeedPiState& state, float requestedKph,
 
   float output = kp * error + state.integralPwm;
   if (output < 0.0f) output = 0.0f;
+  if (output > 0.0f && output < static_cast<float>(minimumPwm))
+    output = static_cast<float>(minimumPwm);
   if (output > static_cast<float>(maximumPwm))
     output = static_cast<float>(maximumPwm);
   return {static_cast<int16_t>(output + 0.5f), state.rampedTargetKph};
