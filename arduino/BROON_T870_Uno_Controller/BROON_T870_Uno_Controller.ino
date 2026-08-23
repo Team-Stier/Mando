@@ -37,7 +37,6 @@ using BroonT870::FAULT_STEERING_RUNTIME; // 조향 중 실행 오류 코드 상�
 using BroonT870::FAULT_STEERING_SENSOR;  // 조향 센서 오류 코드 상수
 using BroonT870::FAULT_STEERING_STALL;   // 조향 모터 막힘 오류 코드 상수
 using BroonT870::FAULT_DRIVE_NO_FEEDBACK;
-using BroonT870::FAULT_DRIVE_OVERSPEED;
 
 using BroonT870Controller::MotorPins;  // 모터 핀 묶음 타입 (PWM핀 + 방향핀)
 
@@ -78,7 +77,6 @@ bool steeringSensorFault = false;       // 조향 센서 오류 발생 여부
 bool steeringStallFault = false;        // 조향 모터 막힘(스톨) 오류 발생 여부
 bool steeringRuntimeFault = false;      // 조향 실행 중 오류 발생 여부
 bool driveNoFeedbackFault = false;
-bool driveOverspeedFault = false;
 bool rcStopActive = true;               // 조종기 throttle-cut 또는 신호 손실 정지 상태(초기값: 정지)
 int16_t rosSpeedControlPwm = 0;
 int16_t latestDriveRequestedPwm = 0;
@@ -142,7 +140,10 @@ bool validateConfiguration() {
          BroonT870Controller::kSteeringFullPwmErrorPermille <= 1000U &&
          BroonT870Controller::kSteeringEndpointSettleErrorAdc <
              BroonT870Controller::kSteeringEndpointRestartErrorAdc &&
-         BroonT870Controller::kRosDriveMinimumPwm <=
+         BroonT870Controller::kRosSpeedControlConfig.maximumTargetKph > 0U &&
+         BroonT870Controller::kRosSpeedControlConfig.measuredSpeedCeilingKph >=
+             static_cast<float>(BroonT870Controller::kRosSpeedControlConfig.maximumTargetKph) &&
+         BroonT870Controller::kRosSpeedControlConfig.driveMinimumPwm <=
              BroonT870Controller::kDriveForwardMaxPwm &&
          BroonT870Controller::kDriveForwardMaxPwm > 0U && // 전진 최대 PWM이 양수인지
          BroonT870Controller::kDriveReverseMaxPwm > 0U;   // 후진 최대 PWM이 양수인지
@@ -293,7 +294,7 @@ void updateRosCommand(uint32_t nowMs) {
   rosCommand = rosBridge.vehicleCommand(
       nowMs,                                             // 현재 시각(ms)
       BroonT870Controller::kRosTimeoutMs,               // ROS 명령 유효 시간 — 이보다 오래됐으면 무시
-      BroonT870Controller::kRosMaximumAbsKph,           // ROS가 요청할 수 있는 최대 속도(km/h)
+      BroonT870Controller::kRosSpeedControlConfig.maximumTargetKph, // ROS 목표속도 클램프(km/h)
       BroonT870Controller::kRosMinimumDegrees,          // ROS 조향 최소 각도
       BroonT870Controller::kRosMaximumDegrees,          // ROS 조향 최대 각도
       BroonT870Controller::kSteeringCalibration.leftSafeAdc,  // 왼쪽 안전 ADC값
@@ -386,7 +387,6 @@ void updateSafety(uint32_t nowMs) {
       steeringStallFault,                         // 조향 스톨 오류?
       steeringRuntimeFault,                       // 조향 런타임 오류?
       driveNoFeedbackFault,                       // 구동 명령 중 엔코더 무응답?
-      driveOverspeedFault,                        // 측정 속도 과속?
       selectedMode,                               // 현재 선택된 모드(RC/ROS)
       BroonT870Controller::kNeutralHoldMs,        // 출발 전 중립 유지 시간 설정
   };
@@ -572,22 +572,6 @@ void updateRosSpeedControl(uint32_t nowMs, bool encoderMeasurementUpdated) {
   const bool driveOutputAuthorized =
       BROON_ENABLE_ACTUATOR_OUTPUTS != 0 && outputsAllowed &&
       !safetyResult.immediateStop;
-  if (encoderMeasurementUpdated && selectedMode == MODE_ROS &&
-      driveOutputAuthorized) {
-    BroonT870::DriveFeedbackWatchdogState overspeedOnlyState = {0UL, false};
-    const BroonT870::DriveFeedbackWatchdogResult overspeedCheck =
-        BroonT870::updateDriveFeedbackWatchdog(
-            overspeedOnlyState, 0.0f, measuredAbsoluteKph,
-            frontEncoderMeasurement.deltaCount, 0,
-            BroonT870Controller::kDriveFeedbackMinimumPwm,
-            BroonT870Controller::kDriveNoFeedbackTimeoutMs,
-            BroonT870Controller::kDriveOverspeedLimitKph, nowMs);
-    if (overspeedCheck.overspeedFault) {
-      driveOverspeedFault = true;
-      latchControllerFault(FAULT_DRIVE_OVERSPEED, nowMs);
-      return;
-    }
-  }
   const bool commandCanDrive =
       selectedMode == MODE_ROS && activeCommand.valid && !rcStopActive &&
       !activeCommand.brakeRequested && activeCommand.targetSpeedKph > 0.0f;
@@ -599,12 +583,20 @@ void updateRosSpeedControl(uint32_t nowMs, bool encoderMeasurementUpdated) {
 
   const BroonT870::SpeedPiResult piResult = BroonT870::updateSpeedPi(
       rosSpeedPiState, activeCommand.targetSpeedKph, measuredAbsoluteKph,
-      BroonT870Controller::kRosSpeedKp, BroonT870Controller::kRosSpeedKi,
-      BroonT870Controller::kRosSpeedDeadbandKph,
-      BroonT870Controller::kRosTargetRampKphPerSecond,
-      BroonT870Controller::kRosDriveMinimumPwm,
+      BroonT870Controller::kRosSpeedControlConfig.kp,
+      BroonT870Controller::kRosSpeedControlConfig.ki,
+      BroonT870Controller::kRosSpeedControlConfig.deadbandKph,
+      BroonT870Controller::kRosSpeedControlConfig.targetRampKphPerSecond,
+      BroonT870Controller::kRosSpeedControlConfig.driveMinimumPwm,
       BroonT870Controller::kDriveForwardMaxPwm, latestEncoderSampleTimeMs);
-  rosSpeedControlPwm = piResult.pwm;
+  // Keep PI state tracking the 15 km/h target. Only override the actuator
+  // request while the measured absolute speed is strictly above the ceiling.
+  rosSpeedControlPwm = BroonT870::isSpeedAboveCeiling(
+                           measuredAbsoluteKph,
+                           BroonT870Controller::kRosSpeedControlConfig
+                               .measuredSpeedCeilingKph)
+                           ? 0
+                           : piResult.pwm;
 
   if (!driveOutputAuthorized) {
     BroonT870::resetDriveFeedbackWatchdog(driveFeedbackWatchdogState);
@@ -613,16 +605,12 @@ void updateRosSpeedControl(uint32_t nowMs, bool encoderMeasurementUpdated) {
   const BroonT870::DriveFeedbackWatchdogResult watchdog =
       BroonT870::updateDriveFeedbackWatchdog(
           driveFeedbackWatchdogState, activeCommand.targetSpeedKph,
-          measuredAbsoluteKph, frontEncoderMeasurement.deltaCount,
-          rosSpeedControlPwm, BroonT870Controller::kDriveFeedbackMinimumPwm,
-          BroonT870Controller::kDriveNoFeedbackTimeoutMs,
-          BroonT870Controller::kDriveOverspeedLimitKph, nowMs);
+          frontEncoderMeasurement.deltaCount, rosSpeedControlPwm,
+          BroonT870Controller::kDriveFeedbackMinimumPwm,
+          BroonT870Controller::kDriveNoFeedbackTimeoutMs, nowMs);
   if (watchdog.noFeedbackFault) {
     driveNoFeedbackFault = true;
     latchControllerFault(FAULT_DRIVE_NO_FEEDBACK, nowMs);
-  } else if (watchdog.overspeedFault) {
-    driveOverspeedFault = true;
-    latchControllerFault(FAULT_DRIVE_OVERSPEED, nowMs);
   }
 }
 

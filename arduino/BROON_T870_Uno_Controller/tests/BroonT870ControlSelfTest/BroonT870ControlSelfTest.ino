@@ -24,8 +24,12 @@ static_assert(
     "steering calibration must use the newly measured full range");
 static_assert(BroonT870Controller::kSteeringFullPwmErrorPermille == 100U,
               "steering must reach full PWM near ten percent position error");
-static_assert(BroonT870Controller::kRosDriveMinimumPwm == 80U,
+static_assert(BroonT870Controller::kRosSpeedControlConfig.driveMinimumPwm == 80U,
               "ROS positive PI output must preserve drive breakaway PWM");
+static_assert(BroonT870Controller::kRosSpeedControlConfig.maximumTargetKph == 15U,
+              "the Arduino ROS target ceiling must be 15 km/h");
+static_assert(BroonT870Controller::kRosSpeedControlConfig.measuredSpeedCeilingKph == 15.0f,
+              "the Arduino measured-speed ceiling must be 15 km/h");
 static_assert(BroonT870Controller::kDriveForwardMaxPwm == 200U &&
                   BroonT870Controller::kDriveReverseMaxPwm == 200U,
               "drive limits must match the current bench setting");
@@ -191,31 +195,40 @@ void testDriveFeedbackWatchdog() {
   BroonT870::DriveFeedbackWatchdogState state = {0UL, false};
   BroonT870::DriveFeedbackWatchdogResult result =
       BroonT870::updateDriveFeedbackWatchdog(
-          state, 1.0f, 0.0f, 0L, 59, 60U, 1500U, 4.0f, 0UL);
+          state, 1.0f, 0L, 59, 60U, 1500U, 0UL);
   expectEqual(F("watchdog below PWM threshold"), result.noFeedbackFault, 0);
   expectEqual(F("watchdog below threshold reset"), state.timing, 0);
 
   result = BroonT870::updateDriveFeedbackWatchdog(
-      state, 1.0f, 0.0f, 0L, 60, 60U, 1500U, 4.0f, 100UL);
+      state, 1.0f, 0L, 60, 60U, 1500U, 100UL);
   expectEqual(F("watchdog timer starts"), state.timing, 1);
   result = BroonT870::updateDriveFeedbackWatchdog(
-      state, 1.0f, 0.0f, 0L, 60, 60U, 1500U, 4.0f, 1599UL);
+      state, 1.0f, 0L, 60, 60U, 1500U, 1599UL);
   expectEqual(F("watchdog before timeout"), result.noFeedbackFault, 0);
   result = BroonT870::updateDriveFeedbackWatchdog(
-      state, 1.0f, 0.0f, 0L, 60, 60U, 1500U, 4.0f, 1600UL);
+      state, 1.0f, 0L, 60, 60U, 1500U, 1600UL);
   expectEqual(F("watchdog at timeout"), result.noFeedbackFault, 1);
 
   result = BroonT870::updateDriveFeedbackWatchdog(
-      state, 1.0f, 0.1f, 1L, 60, 60U, 1500U, 4.0f, 1700UL);
+      state, 1.0f, 1L, 60, 60U, 1500U, 1700UL);
   expectEqual(F("watchdog encoder recovery"), state.timing, 0);
   expectEqual(F("watchdog recovery no fault"), result.noFeedbackFault, 0);
 
-  result = BroonT870::updateDriveFeedbackWatchdog(
-      state, 1.0f, 4.1f, 1L, 20, 60U, 1500U, 4.0f, 1800UL);
-  expectEqual(F("watchdog overspeed"), result.overspeedFault, 1);
-
   BroonT870::resetDriveFeedbackWatchdog(state);
   expectEqual(F("watchdog explicit reset"), state.timing, 0);
+}
+
+void testNonLatchingRosSpeedCeiling() {
+  expectEqual(F("speed ceiling allows below limit"),
+              BroonT870::isSpeedAboveCeiling(14.9f, 15.0f), 0);
+  expectEqual(F("speed ceiling allows exact limit"),
+              BroonT870::isSpeedAboveCeiling(15.0f, 15.0f), 0);
+  expectEqual(F("speed ceiling clamps above limit"),
+              BroonT870::isSpeedAboveCeiling(15.01f, 15.0f), 1);
+  expectEqual(F("speed ceiling uses absolute reverse speed"),
+              BroonT870::isSpeedAboveCeiling(-15.01f, 15.0f), 1);
+  expectEqual(F("invalid speed ceiling fails closed"),
+              BroonT870::isSpeedAboveCeiling(0.0f, 0.0f), 1);
 }
 
 void testRosTargetSpeedSurvivesCommandSelection() {
@@ -345,25 +358,17 @@ void testSteeringEndpointHoldSelectionAndBehavior() {
   expectEqual(F("endpoint reacquires after real retreat"), pwm, -60);
 }
 
-void testDriveFaultsLatchSafetyState() {
+void testDriveNoFeedbackFaultLatchesSafetyState() {
   BroonT870::SafetyState state = {BroonT870::STATE_ARMED,
                                   BroonT870::FAULT_NONE, 0UL, false};
   BroonT870::SafetyInputs inputs = {
       true,  true,  true,  false, true,  false, true,
-      false, false, false, true,  false, BroonT870::MODE_ROS, 500U};
+      false, false, false, true,  BroonT870::MODE_ROS, 500U};
   BroonT870::SafetyResult result =
       BroonT870::updateSafetyState(state, inputs, 1000UL);
   expectEqual(F("no-feedback fault code"), result.activeFault,
               BroonT870::FAULT_DRIVE_NO_FEEDBACK);
   expectEqual(F("no-feedback immediate stop"), result.immediateStop, 1);
-
-  state = {BroonT870::STATE_ARMED, BroonT870::FAULT_NONE, 0UL, false};
-  inputs.driveNoFeedbackFault = false;
-  inputs.driveOverspeedFault = true;
-  result = BroonT870::updateSafetyState(state, inputs, 1000UL);
-  expectEqual(F("overspeed fault code"), result.activeFault,
-              BroonT870::FAULT_DRIVE_OVERSPEED);
-  expectEqual(F("overspeed immediate stop"), result.immediateStop, 1);
 }
 
 }  // namespace
@@ -374,11 +379,12 @@ void setup() {
   testResponsiveDriveRampAndNeutralStop();
   testSpeedPiController();
   testDriveFeedbackWatchdog();
+  testNonLatchingRosSpeedCeiling();
   testRosTargetSpeedSurvivesCommandSelection();
   testMeasuredCalibrationAndSteeringLimits();
   testSteeringHuntingSuppression();
   testSteeringEndpointHoldSelectionAndBehavior();
-  testDriveFaultsLatchSafetyState();
+  testDriveNoFeedbackFaultLatchesSafetyState();
   Serial.print(F("TOTAL pass="));
   Serial.print(passCount);
   Serial.print(F(" fail="));

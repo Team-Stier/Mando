@@ -139,6 +139,8 @@ Uno에서 약 300 count/rev로 측정될 수 있다. 반대로 75가 이미 같�
 | RC 스로틀 최소·중앙·최대 | RcBench에서 전후 끝점과 중립을 기록 | µs | `kRcThrottleCalibration` |
 | RC AUX 최소·중앙·최대 | RcBench에서 스위치 각 위치를 기록 | µs | `kRcAuxCalibration` |
 | RC throttle-cut 펄스 | throttle-cut 활성·해제 상태를 각각 측정 | µs | `kRcStopThresholdUs` |
+| ROS 목표속도 클램프 | 상위·직접 발행 명령에 허용할 최대 목표속도 | km/h | `kRosSpeedControlConfig.maximumTargetKph` |
+| ROS 실측속도 ceiling | 하위에서 더 이상 구동 PWM을 허용하지 않을 속도 | km/h | `kRosSpeedControlConfig.measuredSpeedCeilingKph` |
 | 전륜·후륜 안전 PWM | OutputBench에서 한 채널씩 낮은 값부터 확인 | 0~255 | `kDriveForwardMaxPwm`, `kDriveReverseMaxPwm` |
 | 조향 최소·최대 PWM | 기계 끝에서 떨어진 구간에서 낮은 값부터 확인 | 0~255 | `kSteeringMinimumPwm`, `kSteeringMaximumPwm` |
 | 모터 실제 방향 | 각 모터의 양·음 명령과 실제 움직임 비교 | true/false | 세 `...DirectionInverted` 값 |
@@ -267,7 +269,11 @@ ROS 전용 목표속도와 PI 출력은 이 로그에서 제외한다.
 
 ROS 모드의 `DriveCmd.KPH`는 PWM 비율이 아니라 **목표속도**다. 전륜 D2/D3
 엔코더로 100 ms마다 측정한 속도와 목표속도의 차이를 PI 제어해 전·후륜 공통
-PWM을 만든다. 현재 제한은 목표 3 km/h, 양의 PI 출력 최소 PWM 80, 최대 PWM 200,
+PWM을 만든다. Arduino는 ROS 목표를 최대 15 km/h로 제한한다. 실측속도 15 km/h까지는
+PI가 목표를 계속 추종하고, 15 km/h를 초과한 주기만 fault 없이 구동 PWM을 0으로
+제한한다. 실측속도가 다시 15 km/h 이하가 되면 즉시 PI 출력을 사용한다. 상위 제어기의
+현재 운용 상한은 10 km/h, 기본 목표는 5 km/h다. 양의 PI 출력 최소 PWM은 80,
+최대 PWM은 200,
 목표 램프 1 km/h/s이며, Kp 20, Ki 8, 속도 데드밴드 0.12 km/h다. 계산 출력이
 0이면 PWM도 0이고, 계산 출력이 1~79이면 기동을 위해 80으로 올린다. 적분 포화
 방지를 적용하고 목표 0,
@@ -275,8 +281,10 @@ brake, ROS timeout, RC 원격정지, RC 모드 전환 시 PI 상태를 초기화
 모드는 엔코더 폐루프가 아니라 기존 스로틀-to-PWM 방식이다.
 
 현재 토픽/벤치 시험 설정에서는 전륜 엔코더 경로가 아직 검증되지 않아 무응답
-timeout을 0으로 두고 fault 5(`FAULT_DRIVE_NO_FEEDBACK`)를 비활성화했다. 측정속도가
-4 km/h를 넘는 fault 6(`FAULT_DRIVE_OVERSPEED`) 감시는 유지한다. 전륜 센서 하나만
+timeout을 0으로 두고 fault 5(`FAULT_DRIVE_NO_FEEDBACK`)를 비활성화했다. 속도 ceiling은
+fault 경로와 분리된 비래칭 PWM 제한이다. 이 ROS 속도 상한과 PI 제어는 RC 모드에
+적용하지 않으며 RC는 기존 throttle-to-PWM 경로를 유지한다.
+전륜 센서 하나만
 있으므로 후륜 개별 속도나 전·후륜 속도 차이는 검출할 수 없다. 실차 주행 전에는
 엔코더를 검증하고 무응답 timeout을 다시 활성화해야 한다.
 

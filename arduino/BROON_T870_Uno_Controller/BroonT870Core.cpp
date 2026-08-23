@@ -221,8 +221,6 @@ SafetyResult updateSafetyState(SafetyState& state, const SafetyInputs& inputs,
     fault = FAULT_STEERING_RUNTIME;
   if (fault == FAULT_NONE && inputs.driveNoFeedbackFault)
     fault = FAULT_DRIVE_NO_FEEDBACK;
-  if (fault == FAULT_NONE && inputs.driveOverspeedFault)
-    fault = FAULT_DRIVE_OVERSPEED;
   if (fault == FAULT_NONE && inputs.actuatorOutputsEnabled &&
       (!inputs.steeringCalibrationConfirmed || !inputs.configurationValid))
     fault = FAULT_CONFIGURATION;
@@ -617,40 +615,41 @@ SpeedPiResult updateSpeedPi(SpeedPiState& state, float requestedKph,
   return {static_cast<int16_t>(output + 0.5f), state.rampedTargetKph};
 }
 
+bool isSpeedAboveCeiling(float measuredAbsoluteKph, float ceilingKph) {
+  if (ceilingKph <= 0.0f) return true;
+  if (measuredAbsoluteKph < 0.0f)
+    measuredAbsoluteKph = -measuredAbsoluteKph;
+  return measuredAbsoluteKph > ceilingKph;
+}
+
 void resetDriveFeedbackWatchdog(DriveFeedbackWatchdogState& state) {
   state.noFeedbackSinceMs = 0UL;
   state.timing = false;
 }
 
 DriveFeedbackWatchdogResult updateDriveFeedbackWatchdog(
-    DriveFeedbackWatchdogState& state, float targetKph,
-    float measuredAbsoluteKph, long encoderDeltaCount, int16_t appliedPwm,
+    DriveFeedbackWatchdogState& state, float targetKph, long encoderDeltaCount,
+    int16_t appliedPwm,
     uint8_t minimumMonitoredPwm, uint16_t noFeedbackTimeoutMs,
-    float overspeedLimitKph, uint32_t nowMs) {
-  if (measuredAbsoluteKph < 0.0f)
-    measuredAbsoluteKph = -measuredAbsoluteKph;
-  const bool overspeedFault =
-      overspeedLimitKph > 0.0f && measuredAbsoluteKph > overspeedLimitKph;
-
+    uint32_t nowMs) {
   int32_t pwmMagnitude = appliedPwm;
   if (pwmMagnitude < 0) pwmMagnitude = -pwmMagnitude;
   if (targetKph <= 0.0f ||
       pwmMagnitude < static_cast<int32_t>(minimumMonitoredPwm) ||
       noFeedbackTimeoutMs == 0U) {
     resetDriveFeedbackWatchdog(state);
-    return {false, overspeedFault};
+    return {false};
   }
   if (encoderDeltaCount != 0L) {
     resetDriveFeedbackWatchdog(state);
-    return {false, overspeedFault};
+    return {false};
   }
   if (!state.timing) {
     state.noFeedbackSinceMs = nowMs;
     state.timing = true;
-    return {false, overspeedFault};
+    return {false};
   }
-  return {hasElapsed(nowMs, state.noFeedbackSinceMs, noFeedbackTimeoutMs),
-          overspeedFault};
+  return {hasElapsed(nowMs, state.noFeedbackSinceMs, noFeedbackTimeoutMs)};
 }
 
 FeedbackStatus nextFeedbackStatus(bool remoteStopActive, bool stopRequested,

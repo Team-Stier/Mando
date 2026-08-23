@@ -22,6 +22,16 @@ struct SteeringCalibration {
   bool adcIncreasesRight;
 };
 
+struct RosSpeedControlConfig {
+  uint16_t maximumTargetKph;
+  float measuredSpeedCeilingKph;
+  float kp;
+  float ki;
+  float deadbandKph;
+  float targetRampKphPerSecond;
+  uint8_t driveMinimumPwm;
+};
+
 constexpr uint8_t kFrontEncoderAPin = 2U;
 constexpr uint8_t kFrontEncoderBPin = 3U;
 constexpr MotorPins kFrontDrivePins = {9U, 8U};
@@ -71,17 +81,16 @@ constexpr uint16_t kRcTimeoutMs = 100U;
 constexpr uint16_t kRosTimeoutMs = 1000U;
 constexpr int16_t kRosMinimumDegrees = -25;
 constexpr int16_t kRosMaximumDegrees = 25;
-constexpr int16_t kRosMaximumAbsKph = 3;
-constexpr float kRosSpeedKp = 20.0f;
-constexpr float kRosSpeedKi = 8.0f;
-constexpr float kRosSpeedDeadbandKph = 0.12f;
-constexpr float kRosTargetRampKphPerSecond = 1.0f;
-constexpr uint8_t kRosDriveMinimumPwm = 80U;
+// ROS-only lower speed control. The upper controller normally sends 5 km/h
+// and rejects values above 10 km/h. The Arduino independently clamps direct
+// ROS targets to 15 km/h and applies a non-latching measured-speed ceiling at
+// 15 km/h. RC remains on its existing open-loop throttle-to-PWM path.
+constexpr RosSpeedControlConfig kRosSpeedControlConfig = {
+    15U, 15.0f, 20.0f, 8.0f, 0.12f, 1.0f, 80U};
 constexpr uint8_t kDriveFeedbackMinimumPwm = 60U;
 // Disabled for the current topic/bench test while the front encoder path is
-// not yet verified. Overspeed monitoring remains active.
+// not yet verified.
 constexpr uint16_t kDriveNoFeedbackTimeoutMs = 0U;
-constexpr float kDriveOverspeedLimitKph = 4.0f;
 constexpr uint16_t kNeutralHoldMs = 500U;
 constexpr uint16_t kDirectionInterlockMs = 300U;
 constexpr uint16_t kSteeringNoProgressMs = 1000U;
