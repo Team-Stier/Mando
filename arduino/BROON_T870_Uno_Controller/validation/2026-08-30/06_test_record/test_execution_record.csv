@@ -1,10 +1,10 @@
 test_id,planned_date,executed_at_kst,mode,environment,input_condition,expected_result,raw_log,report_dir,actual_result,diagnostic_events,classification,pass_fail,operator,reviewer,notes
-TC-CAN-01,2026-08-30,,CAN,motor_power_off,"30초 이상 CAN 수신","protocol=1; complete>=99%; EFLG=0; TEC/REC<32; drop 지속 증가 없음",t870_can_poweroff_01.csv,,,,,,,""
-TC-RC-01,2026-08-30,,RC,stationary,"RC 중립 20초","예상하지 않은 MEDIUM/HIGH 이벤트 0건",t870_rc_stationary_01.csv,,,,,,,""
-TC-RC-02,2026-08-30,,RC,closed_course_low_speed,"정지-저속 직진-감속-정지","속도·엔코더 응답; 구동 관련 예상외 이벤트 없음",t870_rc_drive_01.csv,,,,,,,""
-TC-RC-03,2026-08-30,,RC,lift_or_closed_course_low_speed,"중앙-좌-중앙-우-중앙","목표 방향 ADC 응답; 조향 관련 예상외 이벤트 없음",t870_rc_steering_01.csv,,,,,,,""
-TC-ROS-01,2026-08-30,,ROS,lift_then_closed_course_low_speed,"KPH 0-1-0","속도·엔코더 응답; 정지 후 출력 0",t870_ros_drive_01.csv,,,,,,,""
-TC-ROS-02,2026-08-30,,ROS,lift_or_closed_course_low_speed,"Deg 0,+10,0,-10,0","목표 방향 ADC 응답; 조향 fault 없음",t870_ros_steering_01.csv,,,,,,,""
-TC-SAFE-01,2026-08-30,,RC,lift,"정상 수신 후 RC 수신기 전원 차단","RC invalid; DISARMED/즉시정지; 출력 0",t870_rc_loss_01.csv,,,,,,,"100 ms 정밀 판정 제외"
-TC-SAFE-02,2026-08-30,,ROS,lift,"KPH 1 송신 후 /drive 발행 중단","1초 timeout 후 DISARMED; 출력 0",t870_ros_timeout_01.csv,,,,,,,"독립 ROS timeout 진단 이벤트는 기대하지 않음"
-TC-CAN-02,2026-08-30,,CAN,motor_power_off,"정상 수신 후 로거 전원 또는 버스 분리","CAN 고장만으로 출력 허가·안전정지 상태가 바뀌지 않음",t870_can_disconnect_01.csv,,,,,,,"무수신 구간은 현장기록 또는 영상으로 보완"
+TC-CAN-01,2026-08-30,2026-08-29T21:51:19+09:00,CAN+RC,closed_course_low_speed,RC 조향·저출력 구동과 CAN 원본 프레임을 114.75초 캡처,protocol=1; complete>=99%; EFLG=0; TEC/REC<32; drop 지속 증가 없음,../../../runs/20260829_215119_rc_raw_dbc_01/raw_can.csv,../../../runs/20260829_215119_rc_raw_dbc_01/diagnosis_after_previous_pwm_fix,570/570 complete(100%); 3422 frames; EFLG/TEC/REC/drop=0; DBC 비교 13680개 불일치 0,수정 전 STEERING_SENSOR_JUMP 3(FP); 수정 후 0,TN; FP 3→0,PASS,LeeTak11,미지정,계획의 motor_power_off 조건 대신 더 강한 RC 실차 통합조건에서 수행. CAN 데이터 품질과 DBC 일치만 판정
+TC-RC-01,2026-08-30,,RC,stationary,RC 중립 20초,예상하지 않은 MEDIUM/HIGH 이벤트 0건,,,독립된 20초 연속 정차 로그 없음,,판정불가,미실행,,,최종 로그의 최장 완전 정차 구간은 약 3.37초이므로 계획 기준을 충족했다고 주장하지 않음
+TC-RC-02,2026-08-30,,RC,closed_course_low_speed,정지-저속 직진-감속-정지,속도·엔코더 응답; 구동 관련 예상외 이벤트 없음,,,"최종 로그에 저출력 구동(PWM -67~38, 최고속도 0.31 km/h)은 있으나 계획된 20-30-20초 시퀀스가 아님",,판정불가,미실행,,,전륜 엔코더 기반 구동 시험은 별도 시나리오로 재수집 필요
+TC-RC-03,2026-08-30,2026-08-29T21:51:19+09:00,RC,closed_course_low_speed,좌·우 반복 조향 및 중앙 복귀,목표 방향 ADC 응답; 조향 관련 예상외 이벤트 없음,../../../runs/20260829_215119_rc_raw_dbc_01/raw_can.csv,../../../runs/20260829_215119_rc_raw_dbc_01/diagnosis_after_previous_pwm_fix,"state=2/fault=0; target 200~1000 ADC, actual 212~1020 ADC; 수정 후 예상외 이벤트 0",수정 전 STEERING_SENSOR_JUMP 3(FP); 수정 후 0,FP 3→0; 정상 조향 TN,PASS,LeeTak11,미지정,정확한 10초 유지 대신 반복 동적 조향으로 수행한 절차 편차를 기록
+TC-ROS-01,2026-08-30,,ROS,lift_then_closed_course_low_speed,KPH 0-1-0,속도·엔코더 응답; 정지 후 출력 0,,,ROS 기능시험 완료 진술은 있으나 이번 CAN 증거 패키지에 대응 원본 로그 없음,,판정불가,미실행(증거 없음),,,CAN 로그를 확보한 뒤 별도 판정
+TC-ROS-02,2026-08-30,,ROS,lift_or_closed_course_low_speed,"Deg 0,+10,0,-10,0",목표 방향 ADC 응답; 조향 fault 없음,,,ROS 기능시험 완료 진술은 있으나 이번 CAN 증거 패키지에 대응 원본 로그 없음,,판정불가,미실행(증거 없음),,,CAN 로그를 확보한 뒤 별도 판정
+TC-SAFE-01,2026-08-30,,RC,lift,정상 수신 후 RC 수신기 전원 차단,RC invalid; DISARMED/즉시정지; 출력 0,,,계획된 신호 손실 시험 로그 없음,,판정불가,미실행,,,100 ms 정밀 판정은 CAN 120 ms 주기로 불가; 별도 계측 필요
+TC-SAFE-02,2026-08-30,,ROS,lift,KPH 1 송신 후 /drive 발행 중단,1초 timeout 후 DISARMED; 출력 0,,,계획된 ROS timeout 시험 로그 없음,,판정불가,미실행,,,독립 ROS timeout 진단 이벤트는 구현하지 않았으며 상태전이 시험으로 확인해야 함
+TC-CAN-02,2026-08-30,,CAN,motor_power_off,정상 수신 후 로거 전원 또는 버스 분리,CAN 고장만으로 출력 허가·안전정지 상태가 바뀌지 않음,,,계획된 CAN 분리 시험 로그·현장기록 없음,,판정불가,미실행,,,무수신 구간은 CAN CSV만으로 남지 않으므로 영상 또는 별도 상태 기록 필요

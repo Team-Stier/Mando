@@ -12,3 +12,6 @@
    ├─ diagnosis_events.csv
    └─ diagnosis_data.csv
 ```
+
+실행 결과 요약은 `RC_CAN_REGRESSION_BEFORE.md`에 있다. 실제 상세 CSV는 원본과
+같은 `runs/<실행명>/diagnosis/`에 보존한다.

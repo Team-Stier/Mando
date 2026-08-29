@@ -6,3 +6,7 @@
 
 수정하지 않았다면 이 폴더에는 결과를 만들지 않고 최종 보고서에
 `임계값 수정 없음`과 그 이유를 남긴다.
+
+이번에는 임계값을 바꾸지 않고 `STEERING_SENSOR_JUMP`의 정상 도달 판정 로직을
+수정했다. 6개 실제 로그의 재분석 결과는 `RC_CAN_REGRESSION_AFTER.md`, 상세
+출력은 각 `runs/<실행명>/diagnosis_after_previous_pwm_fix/`에 있다.

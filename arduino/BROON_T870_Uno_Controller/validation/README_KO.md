@@ -25,7 +25,8 @@
 | `04_reports_before/` | 최초 임계값으로 생성한 진단 결과 |
 | `05_reports_after/` | 임계값 수정 후 진단 결과 |
 | `06_test_record/test_execution_record.csv` | 현장 실행 시각·조건·판정 기록 |
-| `07_final/T870_CAN_VALIDATION_REPORT_TEMPLATE.md` | 최종 결과 및 회귀시험 보고서 양식 |
+| `07_final/T870_CAN_VALIDATION_REPORT_TEMPLATE.md` | 빈 최종 보고서 양식 |
+| `07_final/T870_CAN_VALIDATION_REPORT.md` | 2026-08-29 RC+CAN 실행·회귀 결과 |
 
 ## 시험 직전 증거 고정
 
