@@ -1,7 +1,8 @@
 # T870 주행 당일 빠른 CSV 캡처·자동진단
 
-이 절차는 로거 Uno의 CAN 데이터를 CSV로 저장하고, 캡처가 끝나는 즉시 규칙 기반
-고장진단 보고서를 생성한다. 제어 Uno의 RC/ROS 동작에는 관여하지 않는다.
+이 절차는 로거 Uno의 CAN 원본 프레임과 해석된 텔레메트리를 각각 CSV로 저장한다.
+캡처가 끝나면 규칙 기반 고장진단과 DBC 독립 재해석·교차검증까지 자동으로 수행한다.
+제어 Uno의 RC/ROS 동작에는 관여하지 않는다.
 
 ## 주행 전 한 번만 준비
 
@@ -49,14 +50,19 @@ python3 logger/capture_and_diagnose.py \
 
 성공하면 `runs/날짜_시간_idle_smoke/` 아래에 다음이 생긴다.
 
-- `raw_can.csv`: 실제 시각이 붙은 원본 CAN CSV
-- `run_metadata.json`: 포트, 시작·종료 시각, 행 수, 마지막 sequence
+- `can_frames.csv`: 실제 CAN ID, DLC, 8바이트 원문이 보존된 프레임 CSV
+- `raw_can.csv`: 여섯 CAN 메시지를 합친 자동진단용 텔레메트리 CSV
+- `dbc_decoded_frames.csv`: `T870_CAN.dbc`로 독립 재해석한 프레임
+- `dbc_verification_summary.md`: DBC 해석값과 로거 Uno 해석값의 교차검증 결과
+- `run_metadata.json`: 포트, 시작·종료 시각, 행·프레임 수, 마지막 sequence
 - `diagnosis/diagnosis_summary.md`: 사람이 읽는 자동진단 결과
 - `diagnosis/diagnosis_events.csv`: 검출 이벤트 목록
 - `diagnosis/diagnosis_data.csv`: 원본과 파생 진단 데이터
 
-`raw_can.csv` 첫 줄이 `host_time_iso,logger_ms,complete,seq,...`로 시작하고 데이터
-행이 있으며, 메타데이터의 `row_count`가 0보다 크면 CSV 추출은 정상이다.
+`can_frames.csv`에는 `0x100`부터 `0x105`까지의 ID와 `data_hex`가 있어야 한다.
+`raw_can.csv` 첫 줄은 `host_time_iso,logger_ms,complete,seq,...`로 시작한다.
+`dbc_verification_summary.md`가 `PASS`이고 메타데이터의 `row_count`와
+`can_frame_count`가 모두 0보다 크면 원본 수신·해석·교차검증이 정상이다.
 
 통합 실행기는 이미 CAN을 수신 중인 로거 Uno를 방해하지 않도록 COM 포트를 열 때
 DTR/RTS 자동 리셋을 비활성화한다. 따라서 Arduino IDE 시리얼 모니터에서 정상
@@ -74,8 +80,17 @@ python3 logger/capture_and_diagnose.py \
 
 명령 실행 후 `CSV header received; recording rows.`가 보이면 주행을 시작한다.
 주행이 끝나 차량을 안전하게 정지한 뒤 터미널에서 `Ctrl+C`를 한 번 누른다. 그러면
-CSV가 닫히고 자동진단이 바로 실행된다. ROS 주행은 이름을 `ros_normal_01`처럼
-바꾸면 된다. 그래프까지 원하면 명령 끝에 `--plot`을 붙인다.
+두 CSV가 닫히고 자동진단과 DBC 교차검증이 바로 실행된다. ROS 주행은 이름을
+`ros_normal_01`처럼 바꾸면 된다. 그래프까지 원하면 명령 끝에 `--plot`을 붙인다.
+DBC 처리를 일시적으로 생략해야 할 때만 `--skip-dbc`를 붙인다.
+
+이미 저장한 `can_frames.csv`만 다시 DBC로 검증할 수도 있다.
+
+```bash
+python3 can/decode_can_frames.py \
+  --input runs/시험폴더/can_frames.csv \
+  --telemetry runs/시험폴더/raw_can.csv
+```
 
 ## 주행 당일 30초 확인표
 
@@ -85,7 +100,7 @@ CSV가 닫히고 자동진단이 바로 실행된다. ROS 주행은 이름을 `r
 4. `CSV header received` 확인
 5. 주행 시작
 6. 차량 정지 후 `Ctrl+C`
-7. 출력된 `diagnosis_summary.md` 경로 열기
+7. 출력된 `diagnosis_summary.md`와 `dbc_verification_summary.md` 열기
 
 `Ctrl+C`를 누르기 전까지 CSV는 행마다 즉시 flush되므로 예기치 않은 중단이 있어도
 이미 받은 행은 대부분 보존된다. 다만 로그가 실제 고장을 확정하는 것은 아니며,

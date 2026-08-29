@@ -60,6 +60,30 @@ void printCsvHeader() {
       "rc_read_us,tx_dropped,can_eflg,can_tec,can_rec"));
 }
 
+void printHexByte(uint8_t value) {
+  if (value < 0x10U) Serial.print('0');
+  Serial.print(value, HEX);
+}
+
+void printRawCanFrame(uint32_t receivedAtMs, const T870Can::Frame& frame) {
+  // Prefixing raw frames keeps them unambiguous when they share the same USB
+  // serial stream as the decoded telemetry rows. The PC capture program saves
+  // these lines separately without changing the existing diagnosis CSV.
+  Serial.print(F("@CAN,"));
+  Serial.print(receivedAtMs);
+  Serial.print(F(",0x"));
+  if (frame.id < 0x100U) Serial.print('0');
+  if (frame.id < 0x010U) Serial.print('0');
+  Serial.print(frame.id, HEX);
+  Serial.print(',');
+  Serial.print(frame.length);
+  Serial.print(',');
+  for (uint8_t index = 0U; index < frame.length; ++index) {
+    printHexByte(frame.data[index]);
+  }
+  Serial.println();
+}
+
 void startSequence(uint8_t sequence) {
   if (sequenceStarted && decoded.sequence == sequence) return;
   decoded = DecodedTelemetry();
@@ -201,6 +225,7 @@ void loop() {
 
   T870Can::Frame frame;
   while (canController.tryReceive(frame)) {
+    printRawCanFrame(millis(), frame);
     consumeFrame(frame);
   }
 }

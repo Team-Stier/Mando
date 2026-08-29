@@ -39,8 +39,10 @@ push하지 않았으므로 원격 `main` 파일만으로는 CAN이 송신되지 
 | MCP2515 드라이버 | `T870Mcp2515.h` |
 | CAN 프레임 인코딩 규격 | `T870CanProtocol.h` |
 | CAN DBC | `can/T870_CAN.dbc` |
+| DBC 재해석·교차검증기 | `can/decode_can_frames.py` |
 | 로거 Uno(B) 스케치 | `logger/T870CanCsvLogger/T870CanCsvLogger.ino` |
-| Ubuntu CSV 저장기 | `logger/save_serial_csv.py` |
+| 캡처·진단·DBC 통합 실행기 | `logger/capture_and_diagnose.py` |
+| 단순 CSV 저장기 | `logger/save_serial_csv.py` |
 | CAN 프로토콜 자체시험 | `tests/T870CanProtocolSelfTest/T870CanProtocolSelfTest.ino` |
 
 Arduino IDE에서는 `.ino` 한 개만 복사하지 말고
@@ -200,7 +202,12 @@ CAN 초기화 실패, 상대 노드 전원 차단, ACK 부재 또는 버스 단�
 
 ```text
 logger_ms,complete,seq,protocol,state,fault,mode,status_flags,...
+@CAN,2254036,0x102,8,3A01E803D2000000
 ```
+
+`@CAN` 행은 `logger_ms`, 표준 CAN ID, DLC, 실제 데이터 바이트를 차례로 담은
+원본 프레임이다. 통합 실행기는 이 행을 `can_frames.csv`로 분리하고, 일반 CSV 행은
+자동진단용 `raw_can.csv`로 저장한다.
 
 `# MCP2515_INIT_FAILED; retrying every 1000 ms`가 반복되면 로거 Uno와 MCP2515
 사이의 5 V, GND, CS D10, MOSI D11, MISO D12, SCK D13 및 `8.000` 크리스털을
@@ -220,7 +227,7 @@ sudo timedatectl set-timezone Asia/Seoul
 sudo timedatectl set-ntp true
 
 ls /dev/ttyACM* /dev/ttyUSB*
-python3 -m pip install --user pyserial
+python3 -m pip install --user -r logger/requirements.txt
 
 cd /프로젝트/경로/Mando/arduino/BROON_T870_Uno_Controller
 mkdir -p logs
@@ -233,7 +240,8 @@ Arduino IDE 시리얼 모니터는 저장 스크립트를 실행하기 전에 �
 `Ctrl+C`다. `--output`을 생략하면 파일명은
 `t870_can_YYYYMMDD_HHMMSS.csv`가 되며 첫 열
 `host_time_iso`에는 Ubuntu가 설정한 현지 시각과 UTC offset이 기록된다. 다른 장치가
-시리얼 포트를 사용 중이면 로거가 열리지 않는다.
+시리얼 포트를 사용 중이면 로거가 열리지 않는다. 단순 저장기도 원본 프레임을
+`t870_can_YYYYMMDD_HHMMSS_frames.csv`에 별도로 저장한다.
 
 ```text
 host_time_iso,logger_ms,complete,seq,...
@@ -259,9 +267,29 @@ python3 logger/capture_and_diagnose.py \
 ```
 
 `CSV header received; recording rows.`가 출력된 뒤 주행하고, 차량을 정지한 다음
-`Ctrl+C`를 누르면 `runs/날짜_시간_시험명/`에 원본 CSV와 자동진단 보고서가 함께
-생성된다. Windows에서는 `--port COM7`처럼 입력한다. 주행 전에 차량 없이 10초
-검증하는 방법과 당일 확인표는 `logger/QUICK_CAPTURE_KO.md`를 따른다.
+`Ctrl+C`를 누르면 `runs/날짜_시간_시험명/`에 다음 결과가 함께 생성된다.
+
+- `can_frames.csv`: CAN ID·DLC·데이터 바이트 원문
+- `raw_can.csv`: 여섯 메시지를 조립한 자동진단용 텔레메트리
+- `dbc_decoded_frames.csv`: DBC로 독립 해석한 프레임
+- `dbc_verification_summary.md`: DBC와 로거 해석값 일치 여부
+- `diagnosis/diagnosis_summary.md`: 규칙 기반 고장진단 결과
+
+Windows에서는 `--port COM7`처럼 입력한다. 주행 전에 차량 없이 10초 검증하는
+방법과 당일 확인표는 `logger/QUICK_CAPTURE_KO.md`를 따른다.
+
+### 기존 원본 프레임을 DBC로 다시 검증
+
+```bash
+python3 can/decode_can_frames.py \
+  --input runs/시험폴더/can_frames.csv \
+  --telemetry runs/시험폴더/raw_can.csv
+```
+
+검증기는 `T870_CAN.dbc`로 각 프레임을 독립 해석한 뒤, 같은 sequence에 대해 로거
+Uno가 생성한 `raw_can.csv` 값과 신호별로 비교한다. 보고서의 `PASS`는 두 해석
+구현이 같은 CAN 바이트를 동일하게 해석했다는 의미이며 차량 자체의 무고장을
+보증하지는 않는다.
 
 시리얼 권한 오류가 발생하면 아래 명령을 실행하고 Ubuntu에서 로그아웃한 뒤 다시
 로그인한다.

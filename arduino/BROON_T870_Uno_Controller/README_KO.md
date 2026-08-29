@@ -71,8 +71,8 @@ CAN은 RC/ROS 제어 명령을 대신하지 않고, 제어기가 이미 계산�
 보내는 **관찰 전용 경로**다. `BuildOptions.h`의
 `BROON_ENABLE_CAN_TELEMETRY`가 `1`일 때만 송신하며, MCP2515 초기화 또는 송신
 실패가 모터 출력과 fault latch를 변경하지 않는다. 두 Uno 결선, 500 kbit/s·8 MHz
-설정, CSV 저장 절차는 [CAN_TELEMETRY_KO.md](CAN_TELEMETRY_KO.md), 주행 당일
-한 명령 캡처·진단은 [logger/QUICK_CAPTURE_KO.md](logger/QUICK_CAPTURE_KO.md), 로그 자동
+설정, 원본 프레임·DBC 검증 절차는 [CAN_TELEMETRY_KO.md](CAN_TELEMETRY_KO.md), 주행 당일
+한 명령 캡처·진단·DBC 교차검증은 [logger/QUICK_CAPTURE_KO.md](logger/QUICK_CAPTURE_KO.md), 로그 자동
 판정은 [fault_diagnosis/README_KO.md](fault_diagnosis/README_KO.md), 실차 시험계획과
 증거 보관은 [validation/README_KO.md](validation/README_KO.md)를 따른다.
 

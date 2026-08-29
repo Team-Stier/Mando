@@ -16,7 +16,11 @@ import time
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 CONTROLLER_DIR = SCRIPT_DIR.parent
 ANALYZER = CONTROLLER_DIR / "fault_diagnosis" / "analyze_t870_log.py"
+DBC_DECODER = CONTROLLER_DIR / "can" / "decode_can_frames.py"
+DBC_FILE = CONTROLLER_DIR / "can" / "T870_CAN.dbc"
 DEFAULT_RUN_ROOT = CONTROLLER_DIR / "runs"
+RAW_CAN_PREFIX = "@CAN"
+CAN_FRAMES_HEADER = "host_time_iso,logger_ms,can_id,dlc,data_hex"
 LOGGER_HEADER = (
     "logger_ms,complete,seq,protocol,state,fault,mode,status_flags,"
     "uptime_s,drive_req_pwm,front_pwm,rear_pwm,steer_target_adc,"
@@ -25,6 +29,28 @@ LOGGER_HEADER = (
     "can_eflg,can_tec,can_rec"
 )
 LOGGER_COLUMN_COUNT = len(LOGGER_HEADER.split(","))
+
+
+def parse_raw_can_line(line: str) -> tuple[str, str, str, str] | None:
+    """Validate one logger @CAN line and return normalized CSV fields."""
+    fields = line.split(",")
+    if len(fields) != 5 or fields[0] != RAW_CAN_PREFIX:
+        return None
+
+    try:
+        logger_ms = int(fields[1], 10)
+        frame_id = int(fields[2], 0)
+        dlc = int(fields[3], 10)
+    except ValueError:
+        return None
+
+    data_hex = fields[4].strip().upper()
+    if logger_ms < 0 or not 0 <= frame_id <= 0x7FF or not 0 <= dlc <= 8:
+        return None
+    if len(data_hex) != dlc * 2 or re.fullmatch(r"[0-9A-F]*", data_hex) is None:
+        return None
+
+    return str(logger_ms), f"0x{frame_id:03X}", str(dlc), data_hex
 
 
 def safe_name(value: str) -> str:
@@ -60,6 +86,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Save CSV without running the diagnosis",
     )
+    parser.add_argument(
+        "--skip-dbc",
+        action="store_true",
+        help="Do not decode raw frames with T870_CAN.dbc after capture",
+    )
     return parser.parse_args()
 
 
@@ -90,6 +121,9 @@ def main() -> int:
     run_dir = args.output_root.resolve() / f"{stamp}_{safe_name(args.name)}"
     report_dir = run_dir / "diagnosis"
     csv_path = run_dir / "raw_can.csv"
+    can_frames_path = run_dir / "can_frames.csv"
+    dbc_decoded_path = run_dir / "dbc_decoded_frames.csv"
+    dbc_report_path = run_dir / "dbc_verification_summary.md"
     metadata_path = run_dir / "run_metadata.json"
     run_dir.mkdir(parents=True, exist_ok=False)
 
@@ -102,6 +136,9 @@ def main() -> int:
     stop_reason = "capture_error"
     capture_error = ""
     discarded_count = 0
+    can_frame_count = 0
+    invalid_can_frame_line_count = 0
+    can_frame_counts_by_id: dict[str, int] = {}
 
     print(f"run directory : {run_dir}")
     print(f"logger port   : {args.port} @ {args.baud}")
@@ -123,7 +160,13 @@ def main() -> int:
         connection.dtr = False
         connection.rts = False
         connection.open()
-        with connection, csv_path.open("w", encoding="utf-8", newline="") as output:
+        with (
+            connection,
+            csv_path.open("w", encoding="utf-8", newline="") as output,
+            can_frames_path.open("w", encoding="utf-8", newline="") as can_output,
+        ):
+            can_output.write(CAN_FRAMES_HEADER + "\n")
+            can_output.flush()
             try:
                 while True:
                     if args.duration > 0 and time.monotonic() - started_monotonic >= args.duration:
@@ -135,6 +178,22 @@ def main() -> int:
                         continue
                     line = raw.decode("utf-8", errors="replace").strip()
                     if not line:
+                        continue
+                    if line.startswith(RAW_CAN_PREFIX + ","):
+                        parsed_frame = parse_raw_can_line(line)
+                        if parsed_frame is None:
+                            invalid_can_frame_line_count += 1
+                            if invalid_can_frame_line_count <= 3:
+                                print(f"invalid raw CAN line: {line}", file=sys.stderr)
+                            continue
+                        host_time = dt.datetime.now().astimezone().isoformat(timespec="milliseconds")
+                        logger_ms, can_id, dlc, data_hex = parsed_frame
+                        can_output.write(
+                            f"{host_time},{logger_ms},{can_id},{dlc},{data_hex}\n"
+                        )
+                        can_output.flush()
+                        can_frame_count += 1
+                        can_frame_counts_by_id[can_id] = can_frame_counts_by_id.get(can_id, 0) + 1
                         continue
                     if line.startswith("#"):
                         print(f"logger: {line}", file=sys.stderr)
@@ -190,7 +249,7 @@ def main() -> int:
                     if row_count == 1 or row_count % 100 == 0:
                         print(
                             f"captured rows={row_count}, complete={complete_row_count}, "
-                            f"last_seq={last_sequence}"
+                            f"last_seq={last_sequence}, raw_frames={can_frame_count}"
                         )
             except KeyboardInterrupt:
                 stop_reason = "user_ctrl_c"
@@ -215,12 +274,17 @@ def main() -> int:
         "duration_s": round(time.monotonic() - started_monotonic, 3),
         "stop_reason": stop_reason,
         "csv_file": str(csv_path),
+        "can_frames_file": str(can_frames_path),
         "header_received": header_written,
         "row_count": row_count,
         "complete_row_count": complete_row_count,
+        "can_frame_count": can_frame_count,
+        "can_frame_counts_by_id": can_frame_counts_by_id,
+        "invalid_can_frame_line_count": invalid_can_frame_line_count,
         "last_sequence": last_sequence,
         "capture_error": capture_error,
         "diagnosis_exit_code": None,
+        "dbc_decode_exit_code": None,
     }
 
     if capture_error or not header_written or row_count == 0:
@@ -232,7 +296,8 @@ def main() -> int:
         stop_reason = "capture_only"
         metadata["stop_reason"] = stop_reason
         write_metadata(metadata_path, metadata)
-        print(f"CSV saved      : {csv_path}")
+        print(f"telemetry CSV  : {csv_path}")
+        print(f"raw CAN frames : {can_frames_path} ({can_frame_count} frames)")
         print(f"metadata saved : {metadata_path}")
         return 0
 
@@ -250,15 +315,57 @@ def main() -> int:
     print("running automatic diagnosis...")
     completed = subprocess.run(command, check=False)
     metadata["diagnosis_exit_code"] = completed.returncode
+
+    dbc_completed: subprocess.CompletedProcess[bytes] | None = None
+    if not args.skip_dbc:
+        if can_frame_count == 0:
+            print(
+                "DBC verification skipped: no @CAN raw frames were received. "
+                "Upload the latest T870CanCsvLogger firmware to the logger Uno.",
+                file=sys.stderr,
+            )
+        else:
+            dbc_command = [
+                sys.executable,
+                str(DBC_DECODER),
+                "--input",
+                str(can_frames_path),
+                "--dbc",
+                str(DBC_FILE),
+                "--output",
+                str(dbc_decoded_path),
+                "--telemetry",
+                str(csv_path),
+                "--report",
+                str(dbc_report_path),
+            ]
+            print("running DBC decode and telemetry cross-check...")
+            dbc_completed = subprocess.run(dbc_command, check=False)
+            metadata["dbc_decode_exit_code"] = dbc_completed.returncode
+
     write_metadata(metadata_path, metadata)
 
-    print(f"CSV saved      : {csv_path}")
+    print(f"telemetry CSV  : {csv_path}")
+    print(f"raw CAN frames : {can_frames_path} ({can_frame_count} frames)")
     print(f"metadata saved : {metadata_path}")
     if completed.returncode == 0:
         print(f"diagnosis      : {report_dir / 'diagnosis_summary.md'}")
     else:
         print("diagnosis failed; the original CSV is still safe.", file=sys.stderr)
-    return completed.returncode
+    if dbc_completed is not None:
+        if dbc_completed.returncode == 0:
+            print(f"DBC verification: {dbc_report_path}")
+        else:
+            print(
+                "DBC verification failed; CAN frame and telemetry CSV files are still safe.",
+                file=sys.stderr,
+            )
+
+    if completed.returncode != 0:
+        return completed.returncode
+    if dbc_completed is not None and dbc_completed.returncode != 0:
+        return dbc_completed.returncode
+    return 0
 
 
 if __name__ == "__main__":
