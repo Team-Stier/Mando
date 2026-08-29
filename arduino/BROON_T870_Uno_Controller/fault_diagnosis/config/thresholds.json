@@ -1,10 +1,10 @@
 {
   "general": {
     "expected_protocol": 1,
-    "merge_gap_s": 0.4
+    "merge_gap_s": 0.8
   },
   "can": {
-    "sample_gap_warning_s": 0.5,
+    "sample_gap_warning_s": 1.0,
     "tec_warning": 32,
     "tec_high": 128,
     "rec_warning": 32,
@@ -13,13 +13,25 @@
   "steering": {
     "sensor_min_adc": 1,
     "sensor_max_adc": 1022,
+    "safe_min_adc": 180,
+    "safe_max_adc": 1020,
     "active_pwm": 60,
     "tracking_error_adc": 80,
+    "tracking_recovery_adc": 40,
     "tracking_error_duration_s": 0.8,
     "no_response_delta_adc": 2,
     "no_response_duration_s": 1.0,
+    "stable_target_delta_adc": 15,
+    "reverse_min_delta_adc": 3,
+    "reverse_response_duration_s": 0.6,
+    "sensor_jump_adc": 250,
+    "sensor_jump_max_gap_s": 0.25,
+    "sensor_stuck_window_s": 1.5,
+    "sensor_stuck_target_span_adc": 100,
+    "sensor_stuck_actual_span_adc": 4,
     "hunting_window_s": 2.0,
     "hunting_target_span_adc": 10,
+    "hunting_min_actual_span_adc": 15,
     "hunting_min_pwm_sign_changes": 4
   },
   "drive": {

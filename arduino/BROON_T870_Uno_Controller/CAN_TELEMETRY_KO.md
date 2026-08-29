@@ -248,6 +248,21 @@ host_time_iso,logger_ms,complete,seq,...
 프레임 조립과 USB 전송 지연이 포함된다. 일반 주행 로그에는 사용할 수 있지만
 정밀 센서 동기화 시각으로 사용하지 않는다.
 
+### 캡처 종료 후 자동진단까지 한 번에 실행
+
+팀원이 주행 당일 별도 명령을 여러 번 입력하지 않도록 다음 통합 실행기를 권장한다.
+
+```bash
+python3 logger/capture_and_diagnose.py \
+  --port /dev/serial/by-id/실제_로거_Uno_이름 \
+  --name rc_normal_01
+```
+
+`CSV header received; recording rows.`가 출력된 뒤 주행하고, 차량을 정지한 다음
+`Ctrl+C`를 누르면 `runs/날짜_시간_시험명/`에 원본 CSV와 자동진단 보고서가 함께
+생성된다. Windows에서는 `--port COM7`처럼 입력한다. 주행 전에 차량 없이 10초
+검증하는 방법과 당일 확인표는 `logger/QUICK_CAPTURE_KO.md`를 따른다.
+
 시리얼 권한 오류가 발생하면 아래 명령을 실행하고 Ubuntu에서 로그아웃한 뒤 다시
 로그인한다.
 

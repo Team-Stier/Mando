@@ -84,6 +84,73 @@ class DiagnosisTest(unittest.TestCase):
         self.assertIn("STEERING_TRACKING_ERROR", codes)
         self.assertIn("STEERING_NO_RESPONSE", codes)
 
+    def test_does_not_infer_steering_response_fault_during_stop(self) -> None:
+        rows = [normal_row(index) for index in range(24)]
+        for row in rows[4:20]:
+            row["status_flags"] = (1 << 1) | (1 << 2) | (1 << 4)
+            row["steer_target_adc"] = 900
+            row["steer_actual_adc"] = 600
+            row["steer_pwm"] = 160
+        result, _, _ = self.analyze(rows)
+        codes = {event.code for event in result.events}
+        self.assertNotIn("STEERING_TRACKING_ERROR", codes)
+        self.assertNotIn("STEERING_NO_RESPONSE", codes)
+        self.assertNotIn("STEERING_REVERSE_RESPONSE", codes)
+        self.assertNotIn("STEERING_SENSOR_STUCK", codes)
+
+    def test_detects_steering_reverse_response(self) -> None:
+        rows = [normal_row(index) for index in range(28)]
+        actual = 600
+        for row in rows[5:22]:
+            actual -= 5
+            row["steer_target_adc"] = 900
+            row["steer_actual_adc"] = actual
+            row["steer_pwm"] = -160
+        result, _, _ = self.analyze(rows)
+        codes = {event.code for event in result.events}
+        self.assertIn("STEERING_REVERSE_RESPONSE", codes)
+
+    def test_detects_steering_sensor_jump_and_safe_range(self) -> None:
+        rows = [normal_row(index) for index in range(12)]
+        rows[5]["steer_actual_adc"] = 900
+        rows[6]["steer_actual_adc"] = 1021
+        result, _, _ = self.analyze(rows)
+        codes = {event.code for event in result.events}
+        self.assertIn("STEERING_SENSOR_JUMP", codes)
+        self.assertIn("STEERING_SAFE_RANGE", codes)
+
+    def test_detects_steering_sensor_stuck_across_command_changes(self) -> None:
+        rows = [normal_row(index) for index in range(30)]
+        for index, row in enumerate(rows[4:24], start=4):
+            row["steer_target_adc"] = 900 if index % 2 == 0 else 300
+            row["steer_actual_adc"] = 600
+            row["steer_pwm"] = 160 if index % 2 == 0 else -160
+        result, _, _ = self.analyze(rows)
+        codes = {event.code for event in result.events}
+        self.assertIn("STEERING_SENSOR_STUCK", codes)
+
+    def test_detects_steering_hunting_with_actual_oscillation(self) -> None:
+        rows = [normal_row(index) for index in range(24)]
+        for index, row in enumerate(rows[4:20], start=4):
+            row["steer_target_adc"] = 600
+            row["steer_actual_adc"] = 580 if index % 2 == 0 else 620
+            row["steer_pwm"] = 100 if index % 2 == 0 else -100
+        result, _, _ = self.analyze(rows)
+        codes = {event.code for event in result.events}
+        self.assertIn("STEERING_HUNTING", codes)
+
+    def test_accepts_capture_start_and_observed_idle_sample_period(self) -> None:
+        rows = [normal_row(index) for index in range(8)]
+        for index, row in enumerate(rows):
+            row["logger_ms"] = index * 647
+            row["seq"] = 14 + index
+        rows[0]["complete"] = 0
+        rows[0]["protocol"] = 0
+        result, _, _ = self.analyze(rows)
+        codes = {event.code for event in result.events}
+        self.assertNotIn("CAN_INCOMPLETE_SAMPLE", codes)
+        self.assertNotIn("CAN_SAMPLE_GAP", codes)
+
     def test_detects_drive_no_feedback_and_overspeed(self) -> None:
         rows = [normal_row(index) for index in range(30)]
         for row in rows[4:22]:

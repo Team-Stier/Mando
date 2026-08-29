@@ -46,7 +46,11 @@ def write_diagnosis_data(result: AnalysisResult, path: Path) -> None:
         "seq_gap",
         "tx_dropped_delta",
         "steering_error_adc",
+        "steering_target_delta_adc",
         "steering_actual_delta_adc",
+        "steering_actual_rate_adc_s",
+        "steering_error_reduction_adc",
+        "steering_response_direction",
         "controller_reset",
         "diagnostic_event_ids",
         "diagnostic_codes",
@@ -59,7 +63,7 @@ def write_diagnosis_data(result: AnalysisResult, path: Path) -> None:
         writer.writeheader()
         for index, row in enumerate(result.rows):
             output = {column: row.get(column, "") for column in result.input_columns}
-            for column in derived[:6]:
+            for column in derived[:-3]:
                 output[column] = row.get(column, "")
             events = row_events.get(index, [])
             output["diagnostic_event_ids"] = ";".join(str(event.event_id) for event in events)

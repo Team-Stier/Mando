@@ -149,7 +149,11 @@ def add_features(rows: list[dict[str, Any]], config: dict[str, Any]) -> None:
         row["seq_gap"] = 0
         row["tx_dropped_delta"] = 0
         row["steering_error_adc"] = row["steer_target_adc"] - row["steer_actual_adc"]
+        row["steering_target_delta_adc"] = 0
         row["steering_actual_delta_adc"] = 0
+        row["steering_actual_rate_adc_s"] = 0.0
+        row["steering_error_reduction_adc"] = 0
+        row["steering_response_direction"] = 0
         row["controller_reset"] = 0
         row["protocol_valid"] = int(row["protocol"] == expected_protocol)
         if index == 0:
@@ -159,7 +163,25 @@ def add_features(rows: list[dict[str, Any]], config: dict[str, Any]) -> None:
         row["sample_gap_s"] = max(0.0, row["_time_s"] - previous["_time_s"])
         sequence_step = (row["seq"] - previous["seq"]) % 256
         row["seq_gap"] = 0 if sequence_step == 1 else 1
+        row["steering_target_delta_adc"] = (
+            row["steer_target_adc"] - previous["steer_target_adc"]
+        )
         row["steering_actual_delta_adc"] = row["steer_actual_adc"] - previous["steer_actual_adc"]
+        if row["sample_gap_s"] > 0.0:
+            row["steering_actual_rate_adc_s"] = round(
+                row["steering_actual_delta_adc"] / row["sample_gap_s"], 3
+            )
+        previous_error = previous["steer_target_adc"] - previous["steer_actual_adc"]
+        row["steering_error_reduction_adc"] = (
+            abs(previous_error) - abs(row["steering_error_adc"])
+        )
+        response_product = (
+            row["steering_error_adc"] * row["steering_actual_delta_adc"]
+        )
+        if response_product > 0:
+            row["steering_response_direction"] = 1
+        elif response_product < 0:
+            row["steering_response_direction"] = -1
         reset = row["uptime_s"] + 1 < previous["uptime_s"]
         row["controller_reset"] = int(reset)
         if not reset:
@@ -219,9 +241,14 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
     rc = config["rc"]
     expected_protocol = config["general"]["expected_protocol"]
     steering_window: deque[dict[str, Any]] = deque()
+    sensor_stuck_window: deque[dict[str, Any]] = deque()
+    tracking_latched = False
 
     for index, row in enumerate(rows):
-        if row["complete"] != 1:
+        # The logger can attach halfway through the first six-frame sequence.
+        # A single incomplete first row is a capture boundary, not evidence of
+        # an in-drive frame loss.
+        if row["complete"] != 1 and index > 0:
             _hit(
                 hits, row, index, code="CAN_INCOMPLETE_SAMPLE", severity="MEDIUM",
                 subsystem="CAN", diagnosis="CAN 프레임 세트 누락",
@@ -300,11 +327,6 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
         if row["complete"] != 1 or row["protocol"] != expected_protocol:
             continue
 
-        steering_window.append(row)
-        window_start = row["_time_s"] - steering["hunting_window_s"]
-        while steering_window and steering_window[0]["_time_s"] < window_start:
-            steering_window.popleft()
-
         fault = row["fault"]
         if fault in FAULTS:
             subsystem, diagnosis, causes, checks = FAULTS[fault]
@@ -344,6 +366,11 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
         actual_adc = row["steer_actual_adc"]
         pwm_abs = abs(row["steer_pwm"])
         error_abs = abs(row["steering_error_adc"])
+        steering_diagnosis_enabled = bool(
+            (flags & (1 << 0))
+            and (flags & (1 << 3))
+            and not (flags & (1 << 1))
+        )
         if actual_adc < steering["sensor_min_adc"] or actual_adc > steering["sensor_max_adc"]:
             _hit(
                 hits, row, index, code="STEERING_SENSOR_RANGE", severity="HIGH",
@@ -352,8 +379,50 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                 recommended_checks="A4 전압과 포텐시오미터 커넥터 확인",
                 confidence_pct=98, evidence={"steer_actual_adc": actual_adc},
             )
-        steering_active = pwm_abs >= steering["active_pwm"] and error_abs >= steering["tracking_error_adc"]
-        if steering_active:
+        if actual_adc < steering["safe_min_adc"] or actual_adc > steering["safe_max_adc"]:
+            _hit(
+                hits, row, index, code="STEERING_SAFE_RANGE", severity="HIGH",
+                subsystem="조향", diagnosis="조향 안전 가동범위 이탈",
+                possible_causes="포텐시오미터 체결 이동·기계 끝단 초과·교정값 불일치",
+                recommended_checks="조향을 정지하고 실제 끝단과 180~1020 ADC 교정값 재확인",
+                confidence_pct=98,
+                evidence={
+                    "steer_actual_adc": actual_adc,
+                    "safe_min_adc": steering["safe_min_adc"],
+                    "safe_max_adc": steering["safe_max_adc"],
+                },
+            )
+
+        if (
+            index > 0
+            and row["sample_gap_s"] <= steering["sensor_jump_max_gap_s"]
+            and abs(row["steering_actual_delta_adc"]) >= steering["sensor_jump_adc"]
+        ):
+            _hit(
+                hits, row, index, code="STEERING_SENSOR_JUMP", severity="HIGH",
+                subsystem="조향", diagnosis="조향센서 순간 급변",
+                possible_causes="포텐시오미터 신호선 접촉불량·전원/GND 노이즈·ADC 데이터 이상",
+                recommended_checks="A4 신호선, 5 V/GND와 동일 시각의 실제 조향 움직임 확인",
+                confidence_pct=88,
+                evidence={
+                    "actual_delta_adc": row["steering_actual_delta_adc"],
+                    "sample_gap_s": round(row["sample_gap_s"], 3),
+                    "actual_rate_adc_s": row["steering_actual_rate_adc_s"],
+                },
+            )
+
+        steering_active = (
+            steering_diagnosis_enabled
+            and pwm_abs >= steering["active_pwm"]
+        )
+        if not steering_active:
+            tracking_latched = False
+        elif not tracking_latched and error_abs >= steering["tracking_error_adc"]:
+            tracking_latched = True
+        elif tracking_latched and error_abs <= steering["tracking_recovery_adc"]:
+            tracking_latched = False
+
+        if tracking_latched:
             _hit(
                 hits, row, index, code="STEERING_TRACKING_ERROR", severity="MEDIUM",
                 subsystem="조향", diagnosis="조향 목표 추종 오차 지속",
@@ -363,7 +432,16 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                 min_duration_s=steering["tracking_error_duration_s"],
                 evidence={"error_adc": error_abs, "steer_pwm": row["steer_pwm"]},
             )
-            if index > 0 and abs(row["steering_actual_delta_adc"]) <= steering["no_response_delta_adc"]:
+            target_stable = (
+                abs(row["steering_target_delta_adc"])
+                <= steering["stable_target_delta_adc"]
+            )
+            if (
+                index > 0
+                and target_stable
+                and abs(row["steering_actual_delta_adc"])
+                <= steering["no_response_delta_adc"]
+            ):
                 _hit(
                     hits, row, index, code="STEERING_NO_RESPONSE", severity="HIGH",
                     subsystem="조향", diagnosis="조향 PWM 대비 센서 무응답",
@@ -377,11 +455,85 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                         "actual_delta_adc": row["steering_actual_delta_adc"],
                     },
                 )
+            if (
+                index > 0
+                and target_stable
+                and abs(row["steering_actual_delta_adc"])
+                >= steering["reverse_min_delta_adc"]
+                and row["steering_response_direction"] < 0
+            ):
+                _hit(
+                    hits, row, index, code="STEERING_REVERSE_RESPONSE", severity="HIGH",
+                    subsystem="조향", diagnosis="조향 명령 반대방향 응답",
+                    possible_causes="모터 방향 설정·배선·포텐시오미터 방향 또는 기구 조립 오류",
+                    recommended_checks="목표-실제 오차 부호와 ADC 변화방향, D4 방향출력 설정 확인",
+                    confidence_pct=94,
+                    min_duration_s=steering["reverse_response_duration_s"],
+                    evidence={
+                        "error_adc": row["steering_error_adc"],
+                        "actual_delta_adc": row["steering_actual_delta_adc"],
+                        "steer_pwm": row["steer_pwm"],
+                    },
+                )
+
+        if steering_diagnosis_enabled:
+            steering_window.append(row)
+            sensor_stuck_window.append(row)
+        else:
+            steering_window.clear()
+            sensor_stuck_window.clear()
+
+        hunting_start = row["_time_s"] - steering["hunting_window_s"]
+        while steering_window and steering_window[0]["_time_s"] < hunting_start:
+            steering_window.popleft()
+
+        stuck_start = row["_time_s"] - steering["sensor_stuck_window_s"]
+        # Keep the sample immediately before the window boundary so a sampled
+        # signal can actually demonstrate the full configured duration.
+        while (
+            len(sensor_stuck_window) > 1
+            and sensor_stuck_window[1]["_time_s"] <= stuck_start
+        ):
+            sensor_stuck_window.popleft()
+
+        stuck_rows = list(sensor_stuck_window)
+        if (
+            len(stuck_rows) >= 3
+            and stuck_rows[-1]["_time_s"] - stuck_rows[0]["_time_s"]
+            >= steering["sensor_stuck_window_s"]
+        ):
+            stuck_target_span = max(item["steer_target_adc"] for item in stuck_rows) - min(
+                item["steer_target_adc"] for item in stuck_rows
+            )
+            stuck_actual_span = max(item["steer_actual_adc"] for item in stuck_rows) - min(
+                item["steer_actual_adc"] for item in stuck_rows
+            )
+            stuck_max_pwm = max(abs(item["steer_pwm"]) for item in stuck_rows)
+            if (
+                stuck_target_span >= steering["sensor_stuck_target_span_adc"]
+                and stuck_actual_span <= steering["sensor_stuck_actual_span_adc"]
+                and stuck_max_pwm >= steering["active_pwm"]
+            ):
+                _hit(
+                    hits, row, index, code="STEERING_SENSOR_STUCK", severity="HIGH",
+                    subsystem="조향", diagnosis="조향센서 고착 가능성",
+                    possible_causes="포텐시오미터 축 이탈·센서 고착·신호선 고정값 또는 조향계 완전 구속",
+                    recommended_checks="모터 전원을 차단하고 포텐시오미터 체결·A4 전압·기구 움직임 확인",
+                    confidence_pct=90,
+                    evidence={
+                        "target_span_adc": stuck_target_span,
+                        "actual_span_adc": stuck_actual_span,
+                        "max_steer_pwm": stuck_max_pwm,
+                    },
+                )
 
         window = list(steering_window)
         if len(window) >= 4:
             target_span = max(item["steer_target_adc"] for item in window) - min(
                 item["steer_target_adc"] for item in window
+            )
+            actual_span = max(item["steer_actual_adc"] for item in window) - min(
+                item["steer_actual_adc"] for item in window
             )
             signs = []
             for item in window:
@@ -389,14 +541,22 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                 if value != 0:
                     signs.append(1 if value > 0 else -1)
             changes = sum(1 for left, right in zip(signs, signs[1:]) if left != right)
-            if target_span <= steering["hunting_target_span_adc"] and changes >= steering["hunting_min_pwm_sign_changes"]:
+            if (
+                target_span <= steering["hunting_target_span_adc"]
+                and actual_span >= steering["hunting_min_actual_span_adc"]
+                and changes >= steering["hunting_min_pwm_sign_changes"]
+            ):
                 _hit(
                     hits, row, index, code="STEERING_HUNTING", severity="MEDIUM",
                     subsystem="조향", diagnosis="조향 헌팅 가능성",
                     possible_causes="데드밴드·제어게인·기계 유격 또는 센서 노이즈",
                     recommended_checks="목표 고정 구간의 PWM 방향전환과 ADC 진동 확인",
                     confidence_pct=72,
-                    evidence={"pwm_sign_changes": changes, "target_span_adc": target_span},
+                    evidence={
+                        "pwm_sign_changes": changes,
+                        "target_span_adc": target_span,
+                        "actual_span_adc": actual_span,
+                    },
                 )
 
         drive_active = max(
