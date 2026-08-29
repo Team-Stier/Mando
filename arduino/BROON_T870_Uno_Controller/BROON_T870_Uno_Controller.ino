@@ -7,6 +7,7 @@
 #include "BroonT870Core.h"    // BROON T870 차량 전용 핵심 로직 모음
 
 #include "BuildOptions.h"     // "ROS 켜기/끄기", "출력 허용 여부" 같은 빌드 설정 스위치
+#include "CanTelemetry.h"     // MCP2515를 통한 관찰 전용 CAN 상태 송신
 #include "ControllerConfig.h" // 핀 번호, 속도 한계값 등 구체적인 설정값들
 #include "RosBridge.h"        // 컴퓨터(ROS)와 통신하는 다리 역할
 
@@ -51,6 +52,7 @@ volatile long frontEncoderCount = 0;
 volatile uint8_t previousFrontEncoderState = 0U;
 
 BroonT870::BroonT870RcInput rcInput; // RC 조종기 신호를 수신/파싱하는 객체
+BroonT870Controller::CanTelemetry canTelemetry; // 제어에 개입하지 않는 CAN 상태 송신기
 #if BROON_ENABLE_ROS                 // ROS 기능이 켜져 있을 때만 컴파일
 BroonT870Controller::RosBridge rosBridge; // 컴퓨터(ROS)와 통신하는 브리지 객체
 #endif
@@ -102,6 +104,18 @@ uint32_t latestEncoderSampleTimeMs = 0UL;
 bool statusClockStarted = false;        // 상태 출력 타이머가 시작됐는지 여부
 
 void resetRosSpeedControl();
+
+uint16_t clampToUint16(uint32_t value) {
+  return value > 0xFFFFUL ? 0xFFFFU : static_cast<uint16_t>(value);
+}
+
+int16_t speedToCentiKph(float speedKph) {
+  float scaled = speedKph * 100.0f;
+  if (scaled > 32767.0f) scaled = 32767.0f;
+  if (scaled < -32768.0f) scaled = -32768.0f;
+  return static_cast<int16_t>(scaled >= 0.0f ? scaled + 0.5f
+                                             : scaled - 0.5f);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 함수: 조향 캘리브레이션(보정값)이 물리적으로 유효한지 확인
@@ -674,6 +688,54 @@ void publishOrPrintStatus(uint32_t nowMs) {
 #endif
 }
 
+// CAN은 이미 계산된 상태만 복사해 송신한다. CAN 초기화·송신 실패는
+// 명령, fault latch, 출력 허용 여부를 바꾸지 않는다.
+void publishCanTelemetry(uint32_t nowMs) {
+  uint8_t statusFlags = 0U;
+  if (outputsAllowed) statusFlags |= T870Can::STATUS_OUTPUTS_ALLOWED;
+  if (safetyResult.immediateStop)
+    statusFlags |= T870Can::STATUS_IMMEDIATE_STOP;
+  if (rcStopActive) statusFlags |= T870Can::STATUS_RC_STOP;
+  if (activeCommand.valid) statusFlags |= T870Can::STATUS_COMMAND_VALID;
+  if (configurationValid)
+    statusFlags |= T870Can::STATUS_CONFIGURATION_VALID;
+  if (steeringSensorFault || steeringStallFault || steeringRuntimeFault)
+    statusFlags |= T870Can::STATUS_STEERING_FAULT;
+  if (driveNoFeedbackFault) statusFlags |= T870Can::STATUS_DRIVE_FAULT;
+
+  uint8_t rcFlags = 0U;
+  if (latestRcSnapshot.steerValid) rcFlags |= T870Can::RC_STEER_VALID;
+  if (latestRcSnapshot.throttleValid)
+    rcFlags |= T870Can::RC_THROTTLE_VALID;
+  if (latestRcSnapshot.auxValid) rcFlags |= T870Can::RC_AUX_VALID;
+  if (rcStopActive) rcFlags |= T870Can::RC_REMOTE_STOP;
+
+  const T870Can::TelemetrySnapshot snapshot = {
+      static_cast<uint8_t>(safetyResult.state),
+      static_cast<uint8_t>(safetyResult.activeFault),
+      static_cast<uint8_t>(selectedMode),
+      statusFlags,
+      clampToUint16(nowMs / 1000UL),
+      latestDriveRequestedPwm,
+      latestFrontDrivePwm,
+      latestRearDrivePwm,
+      static_cast<uint16_t>(activeCommand.steerTargetAdc < 0
+                                ? 0
+                                : activeCommand.steerTargetAdc),
+      static_cast<uint16_t>(latestSteeringAdc < 0 ? 0
+                                                 : latestSteeringAdc),
+      latestSteeringAuthorizedPwm,
+      speedToCentiKph(measuredAbsoluteKph),
+      static_cast<int32_t>(frontEncoderMeasurement.deltaCount),
+      frontEncoderMeasurement.calibrated,
+      latestRcSnapshot.steerPulseUs,
+      latestRcSnapshot.throttlePulseUs,
+      latestRcSnapshot.auxPulseUs,
+      rcFlags,
+      clampToUint16(latestRcReadUs)};
+  canTelemetry.update(nowMs, snapshot);
+}
+
 } // namespace (이 중괄호 안의 모든 변수/함수는 이 파일 안에서만 유효)
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -691,8 +753,6 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(BroonT870Controller::kFrontEncoderBPin),
                   frontEncoderBIsr, CHANGE); // B핀 신호 변화(CHANGE) 시 frontEncoderBIsr 자동 호출 등록
 
-  pinMode(BroonT870Controller::kStatusLedPin, OUTPUT);          // 상태 표시 LED 핀을 출력 모드로
-  digitalWrite(BroonT870Controller::kStatusLedPin, LOW);        // 상태 LED 꺼짐으로 시작
   rcInput.begin(BroonT870Controller::kRcSteerPin,
                 BroonT870Controller::kRcThrottlePin,
                 BroonT870Controller::kRcAuxPin);                // Uno A0/A1/A2 RC 신호 수신 시작
@@ -707,6 +767,7 @@ void setup() {
 #if BROON_ENABLE_ROS                   // ROS 기능이 켜져 있으면
   rosBridge.begin();                   // ROS 통신 채널 초기화
 #endif
+  canTelemetry.begin();                // 실패해도 차량 제어에는 영향 없음
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -725,5 +786,6 @@ void loop() {
   updateSafety(nowMs);                       // ⑤ 안전 상태 판단 및 모터 출력 허용 여부 결정
   updateSteering(nowMs);                     // ⑥ 조향 모터 P제어 및 안전 가드 적용
   updateDrive(nowMs);                        // ⑦ 앞/뒤 구동 모터 출력 계산 및 적용
-  publishOrPrintStatus(nowMs);               // ⑧ 현재 상태를 ROS 또는 시리얼 모니터로 출력
+  publishCanTelemetry(nowMs);                // ⑧ CAN 상태 송신(활성 빌드에서만)
+  publishOrPrintStatus(nowMs);               // ⑨ 현재 상태를 ROS 또는 시리얼 모니터로 출력
 }

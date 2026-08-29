@@ -1,0 +1,10 @@
+test_id,planned_date,executed_at_kst,mode,environment,input_condition,expected_result,raw_log,report_dir,actual_result,diagnostic_events,classification,pass_fail,operator,reviewer,notes
+TC-CAN-01,2026-08-30,,CAN,motor_power_off,"30초 이상 CAN 수신","protocol=1; complete>=99%; EFLG=0; TEC/REC<32; drop 지속 증가 없음",t870_can_poweroff_01.csv,,,,,,,""
+TC-RC-01,2026-08-30,,RC,stationary,"RC 중립 20초","예상하지 않은 MEDIUM/HIGH 이벤트 0건",t870_rc_stationary_01.csv,,,,,,,""
+TC-RC-02,2026-08-30,,RC,closed_course_low_speed,"정지-저속 직진-감속-정지","속도·엔코더 응답; 구동 관련 예상외 이벤트 없음",t870_rc_drive_01.csv,,,,,,,""
+TC-RC-03,2026-08-30,,RC,lift_or_closed_course_low_speed,"중앙-좌-중앙-우-중앙","목표 방향 ADC 응답; 조향 관련 예상외 이벤트 없음",t870_rc_steering_01.csv,,,,,,,""
+TC-ROS-01,2026-08-30,,ROS,lift_then_closed_course_low_speed,"KPH 0-1-0","속도·엔코더 응답; 정지 후 출력 0",t870_ros_drive_01.csv,,,,,,,""
+TC-ROS-02,2026-08-30,,ROS,lift_or_closed_course_low_speed,"Deg 0,+10,0,-10,0","목표 방향 ADC 응답; 조향 fault 없음",t870_ros_steering_01.csv,,,,,,,""
+TC-SAFE-01,2026-08-30,,RC,lift,"정상 수신 후 RC 수신기 전원 차단","RC invalid; DISARMED/즉시정지; 출력 0",t870_rc_loss_01.csv,,,,,,,"100 ms 정밀 판정 제외"
+TC-SAFE-02,2026-08-30,,ROS,lift,"KPH 1 송신 후 /drive 발행 중단","1초 timeout 후 DISARMED; 출력 0",t870_ros_timeout_01.csv,,,,,,,"독립 ROS timeout 진단 이벤트는 기대하지 않음"
+TC-CAN-02,2026-08-30,,CAN,motor_power_off,"정상 수신 후 로거 전원 또는 버스 분리","CAN 고장만으로 출력 허가·안전정지 상태가 바뀌지 않음",t870_can_disconnect_01.csv,,,,,,,"무수신 구간은 현장기록 또는 영상으로 보완"

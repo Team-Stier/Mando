@@ -1,0 +1,62 @@
+VERSION "T870 CAN telemetry protocol v1"
+
+NS_ :
+    NS_DESC_
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+
+BS_:
+
+BU_: T870_CTRL T870_LOGGER
+
+BO_ 256 T870_STATUS: 8 T870_CTRL
+ SG_ Sequence : 0|8@1+ (1,0) [0|255] "" T870_LOGGER
+ SG_ State : 8|8@1+ (1,0) [0|3] "" T870_LOGGER
+ SG_ Fault : 16|8@1+ (1,0) [0|255] "" T870_LOGGER
+ SG_ Mode : 24|8@1+ (1,0) [0|1] "" T870_LOGGER
+ SG_ StatusFlags : 32|8@1+ (1,0) [0|255] "" T870_LOGGER
+ SG_ UptimeS : 40|16@1+ (1,0) [0|65535] "s" T870_LOGGER
+ SG_ ProtocolVersion : 56|8@1+ (1,0) [0|255] "" T870_LOGGER
+
+BO_ 257 T870_DRIVE: 8 T870_CTRL
+ SG_ Sequence : 0|8@1+ (1,0) [0|255] "" T870_LOGGER
+ SG_ RequestedPwm : 8|16@1- (1,0) [-255|255] "PWM" T870_LOGGER
+ SG_ FrontPwm : 24|16@1- (1,0) [-255|255] "PWM" T870_LOGGER
+ SG_ RearPwm : 40|16@1- (1,0) [-255|255] "PWM" T870_LOGGER
+
+BO_ 258 T870_STEERING: 8 T870_CTRL
+ SG_ Sequence : 0|8@1+ (1,0) [0|255] "" T870_LOGGER
+ SG_ TargetAdc : 8|16@1+ (1,0) [0|1023] "ADC" T870_LOGGER
+ SG_ ActualAdc : 24|16@1+ (1,0) [0|1023] "ADC" T870_LOGGER
+ SG_ SteeringPwm : 40|16@1- (1,0) [-255|255] "PWM" T870_LOGGER
+
+BO_ 259 T870_MOTION: 8 T870_CTRL
+ SG_ Sequence : 0|8@1+ (1,0) [0|255] "" T870_LOGGER
+ SG_ SpeedKph : 8|16@1- (0.01,0) [-327.68|327.67] "km/h" T870_LOGGER
+ SG_ EncoderDelta : 24|32@1- (1,0) [-2147483648|2147483647] "count" T870_LOGGER
+ SG_ EncoderCalibrated : 56|8@1+ (1,0) [0|1] "" T870_LOGGER
+
+BO_ 260 T870_RC: 8 T870_CTRL
+ SG_ Sequence : 0|8@1+ (1,0) [0|255] "" T870_LOGGER
+ SG_ SteerPulseUs : 8|16@1+ (1,0) [0|65535] "us" T870_LOGGER
+ SG_ ThrottlePulseUs : 24|16@1+ (1,0) [0|65535] "us" T870_LOGGER
+ SG_ AuxPulseUs : 40|16@1+ (1,0) [0|65535] "us" T870_LOGGER
+ SG_ RcFlags : 56|8@1+ (1,0) [0|255] "" T870_LOGGER
+
+BO_ 261 T870_TIMING: 8 T870_CTRL
+ SG_ Sequence : 0|8@1+ (1,0) [0|255] "" T870_LOGGER
+ SG_ RcReadUs : 8|16@1+ (1,0) [0|65535] "us" T870_LOGGER
+ SG_ DroppedFrames : 24|16@1+ (1,0) [0|65535] "frame" T870_LOGGER
+ SG_ CanErrorFlags : 40|8@1+ (1,0) [0|255] "" T870_LOGGER
+ SG_ CanTxErrorCount : 48|8@1+ (1,0) [0|255] "" T870_LOGGER
+ SG_ CanRxErrorCount : 56|8@1+ (1,0) [0|255] "" T870_LOGGER
+
+VAL_ 256 State 0 "BOOT_LOCKED" 1 "DISARMED" 2 "ARMED" 3 "FAULT_LATCHED" ;
+VAL_ 256 Fault 0 "NONE" 1 "CONFIGURATION" 2 "STEERING_SENSOR" 3 "STEERING_STALL" 4 "STEERING_RUNTIME" 5 "DRIVE_NO_FEEDBACK" 6 "DRIVE_OVERSPEED" ;
+VAL_ 256 Mode 0 "RC" 1 "ROS" ;
+
+CM_ BO_ 256 "Status flags: bit0 outputs_allowed, bit1 immediate_stop, bit2 rc_stop, bit3 command_valid, bit4 configuration_valid, bit5 steering_fault, bit6 drive_fault.";
+CM_ BO_ 260 "RC flags: bit0 steer_valid, bit1 throttle_valid, bit2 aux_valid, bit3 remote_stop.";
+CM_ "All multi-byte values are Intel/little-endian. MCP2515 oscillator 8 MHz, bus 500 kbit/s, standard 11-bit identifiers.";

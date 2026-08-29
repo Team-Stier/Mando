@@ -1,0 +1,45 @@
+{
+  "general": {
+    "expected_protocol": 1,
+    "merge_gap_s": 0.4
+  },
+  "can": {
+    "sample_gap_warning_s": 0.5,
+    "tec_warning": 32,
+    "tec_high": 128,
+    "rec_warning": 32,
+    "rec_high": 128
+  },
+  "steering": {
+    "sensor_min_adc": 1,
+    "sensor_max_adc": 1022,
+    "active_pwm": 60,
+    "tracking_error_adc": 80,
+    "tracking_error_duration_s": 0.8,
+    "no_response_delta_adc": 2,
+    "no_response_duration_s": 1.0,
+    "hunting_window_s": 2.0,
+    "hunting_target_span_adc": 10,
+    "hunting_min_pwm_sign_changes": 4
+  },
+  "drive": {
+    "active_pwm": 60,
+    "standstill_speed_kph": 0.1,
+    "no_feedback_duration_s": 1.5,
+    "overspeed_kph": 15.0,
+    "uncommanded_speed_kph": 0.5,
+    "uncommanded_duration_s": 0.5,
+    "front_rear_mismatch_pwm": 5,
+    "mismatch_duration_s": 0.3
+  },
+  "rc": {
+    "invalid_duration_s": 0.3,
+    "pulse_margin_us": 50,
+    "steer_min_us": 1100,
+    "steer_max_us": 1800,
+    "throttle_min_us": 1050,
+    "throttle_max_us": 1850,
+    "aux_min_us": 1050,
+    "aux_max_us": 1930
+  }
+}

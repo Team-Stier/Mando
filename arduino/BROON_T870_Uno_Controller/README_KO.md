@@ -53,7 +53,10 @@ AUX 채널이 필요하며, ROS 명령만 계속 들어와도 수신기/AUX가 �
 | D7 | 후륜 구동 DIR | `kRearDrivePins.dir` | D7은 PWM 핀이 아니므로 DIR로만 사용 |
 | D8 | 전륜 구동 DIR | `kFrontDrivePins.dir` | D8은 PWM 핀이 아님 |
 | D9 | 전륜 구동 PWM | `kFrontDrivePins.pwm` | Uno 하드웨어 PWM 출력 |
-| D13 | 상태 LED | `kStatusLedPin` | Uno 내장 LED |
+| D10 | MCP2515 CS | `kCanChipSelectPin` | CAN 활성 시 SPI 장치 선택 |
+| D11 | MCP2515 MOSI | Uno 하드웨어 SPI | CAN 활성 시 다른 용도로 사용 금지 |
+| D12 | MCP2515 MISO | Uno 하드웨어 SPI | CAN 활성 시 다른 용도로 사용 금지 |
+| D13 | MCP2515 SCK | Uno 하드웨어 SPI | 상태 LED로 사용하지 않음 |
 | A0 | RC 조향 | `kRcSteerPin` | 수신기와 Uno GND 공통 |
 | A1 | RC 스로틀 | `kRcThrottlePin` | 수신기와 Uno GND 공통 |
 | A2 | RC AUX | `kRcAuxPin` | RC/ROS 모드 선택 채널 |
@@ -63,6 +66,14 @@ AUX 채널이 필요하며, ROS 명령만 계속 들어와도 수신기/AUX가 �
 후륜은 PWM D6, DIR D7이며 D7에는 `analogWrite()`를 사용하지 않는다.
 D2·D3은 전륜 사분위 엔코더 외부 인터럽트용이며, A0·A1·A2 RC 입력은 이전 참고
 코드와 같은 `pulseIn(..., HIGH, 50000)` 방식으로 순차 캡처한다.
+
+CAN은 RC/ROS 제어 명령을 대신하지 않고, 제어기가 이미 계산한 상태를 로거로
+보내는 **관찰 전용 경로**다. `BuildOptions.h`의
+`BROON_ENABLE_CAN_TELEMETRY`가 `1`일 때만 송신하며, MCP2515 초기화 또는 송신
+실패가 모터 출력과 fault latch를 변경하지 않는다. 두 Uno 결선, 500 kbit/s·8 MHz
+설정, CSV 저장 절차는 [CAN_TELEMETRY_KO.md](CAN_TELEMETRY_KO.md), 로그 자동
+판정은 [fault_diagnosis/README_KO.md](fault_diagnosis/README_KO.md), 실차 시험계획과
+증거 보관은 [validation/README_KO.md](validation/README_KO.md)를 따른다.
 
 ## 벤치 스케치 업로드와 실행 방법
 
@@ -383,8 +394,8 @@ ROS 통신, timeout, 수신기 손실과 피드백이 무출력 상태에서 모
 - 즉시 접근 가능한 물리 24 V 차단장치, 공통 신호 GND, 적절한 퓨즈를 확인한다.
 - 엔코더 전압이 Uno 입력 허용 범위인지 계측한다.
 - 모든 출력/방향/교정 시험은 바퀴를 지면에서 띄운 상태에서 한다.
-- CAN은 RC/ROS 기반 차량 제어가 검증될 때까지 의도적으로 보류한다. 현재 후륜은
-  D6/D7을 사용하므로 D10/D11은 후륜 출력에 사용하지 않는다.
+- CAN 송신은 관찰 전용이며, D10~D13은 MCP2515 SPI에만 사용한다. CAN이 끊겨도
+  제어는 계속되므로 시험 중 CAN 로그 유실 여부와 차량 정지 안전은 별도로 판단한다.
 
 이 항목과 정적 빌드가 통과해도 도로 주행 안전을 증명하지 않는다.
 

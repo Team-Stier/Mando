@@ -41,7 +41,9 @@ constexpr uint8_t kSteeringSensorPin = A4;
 constexpr uint8_t kRcSteerPin = A0;
 constexpr uint8_t kRcThrottlePin = A1;
 constexpr uint8_t kRcAuxPin = A2;
-constexpr uint8_t kStatusLedPin = 13U;
+// CAN telemetry uses the Uno hardware SPI bus: CS=D10, MOSI=D11,
+// MISO=D12, SCK=D13. These pins must not be assigned to actuators or LEDs.
+constexpr uint8_t kCanChipSelectPin = 10U;
 
 // The current decoder counts every valid A/B transition (x4 decoding).
 // Treat the supplied 75 PPR as 75 quadrature cycles per wheel revolution:
@@ -77,6 +79,9 @@ constexpr uint16_t kAuxRcThresholdUs = 1600U;
 constexpr uint32_t kControlIntervalMs = 20UL;
 constexpr uint32_t kEncoderSampleIntervalMs = 100UL;
 constexpr uint32_t kStatusIntervalMs = 100UL;
+// One of six telemetry frame types is sent per slot, so a complete sequence
+// is produced every 120 ms at this 20 ms interval.
+constexpr uint32_t kCanFrameIntervalMs = 20UL;
 constexpr uint16_t kRcTimeoutMs = 100U;
 constexpr uint16_t kRosTimeoutMs = 1000U;
 constexpr int16_t kRosMinimumDegrees = -25;
@@ -157,5 +162,15 @@ static_assert(kFrontEncoderAPin == 2U && kFrontEncoderBPin == 3U,
 static_assert(kFrontDrivePins.pwm == 9U && kRearDrivePins.pwm == 6U &&
                   kSteeringPins.pwm == 5U,
               "Uno motor PWM pins must match the confirmed wiring");
+#if BROON_ENABLE_CAN_TELEMETRY
+static_assert(kRearDrivePins.pwm == 6U && kRearDrivePins.dir == 7U,
+              "CAN wiring requires rear drive on D6/D7");
+static_assert(kCanChipSelectPin == 10U,
+              "Uno MCP2515 chip select must use hardware SS pin D10");
+static_assert(kFrontDrivePins.pwm < 10U && kFrontDrivePins.dir < 10U &&
+                  kRearDrivePins.pwm < 10U && kRearDrivePins.dir < 10U &&
+                  kSteeringPins.pwm < 10U && kSteeringPins.dir < 10U,
+              "D10-D13 are reserved for MCP2515 hardware SPI");
+#endif
 
 }  // namespace BroonT870Controller

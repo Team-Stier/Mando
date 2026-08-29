@@ -18,6 +18,12 @@
 #define BROON_ENABLE_HUMAN_SERIAL 0
 #endif
 
+// MCP2515 telemetry is monitoring-only. D10-D13 SPI wiring and both bus-end
+// termination jumpers were verified before enabling this checked-in default.
+#ifndef BROON_ENABLE_CAN_TELEMETRY
+#define BROON_ENABLE_CAN_TELEMETRY 1
+#endif
+
 #if BROON_ENABLE_ROS && BROON_ENABLE_HUMAN_SERIAL
 #error "ROS and human-readable Serial cannot share the Uno USB port"
 #endif
