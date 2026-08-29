@@ -11,17 +11,24 @@
 #endif
 
 #ifndef BROON_ENABLE_ROS
-#define BROON_ENABLE_ROS 1
+#define BROON_ENABLE_ROS 0
 #endif
 
 #ifndef BROON_ENABLE_HUMAN_SERIAL
-#define BROON_ENABLE_HUMAN_SERIAL 0
+#define BROON_ENABLE_HUMAN_SERIAL 1
 #endif
 
 // MCP2515 telemetry is monitoring-only. D10-D13 SPI wiring and both bus-end
 // termination jumpers were verified before enabling this checked-in default.
 #ifndef BROON_ENABLE_CAN_TELEMETRY
 #define BROON_ENABLE_CAN_TELEMETRY 1
+#endif
+
+// Competition vehicle runs without an occupant. Faults still cut every motor
+// output immediately, but they are reported as recoverable DISARMED events so
+// the hidden controller does not require a physical RESET to resume.
+#ifndef BROON_ENABLE_LATCHED_FAULTS
+#define BROON_ENABLE_LATCHED_FAULTS 0
 #endif
 
 #if BROON_ENABLE_ROS && BROON_ENABLE_HUMAN_SERIAL

@@ -243,8 +243,12 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
     steering_window: deque[dict[str, Any]] = deque()
     sensor_stuck_window: deque[dict[str, Any]] = deque()
     tracking_latched = False
+    capture_started_s = rows[0]["_time_s"]
 
     for index, row in enumerate(rows):
+        in_can_startup_grace = (
+            row["_time_s"] - capture_started_s < can["startup_grace_s"]
+        )
         # The logger can attach halfway through the first six-frame sequence.
         # A single incomplete first row is a capture boundary, not evidence of
         # an in-drive frame loss.
@@ -289,7 +293,7 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                 recommended_checks="tx_dropped 증가율, TEC, 상대 노드 전원 점검",
                 confidence_pct=98, evidence={"tx_dropped_delta": row["tx_dropped_delta"]},
             )
-        if row["can_eflg"] != 0:
+        if row["can_eflg"] != 0 and not in_can_startup_grace:
             _hit(
                 hits, row, index, code="CAN_ERROR_FLAG", severity="HIGH",
                 subsystem="CAN", diagnosis="MCP2515 CAN 오류 플래그 발생",
@@ -297,7 +301,7 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                 recommended_checks="EFLG 비트, CAN-H/L, 60 ohm 종단과 500 kbps 확인",
                 confidence_pct=99, evidence={"can_eflg": row["can_eflg"]},
             )
-        if row["can_tec"] >= can["tec_warning"]:
+        if row["can_tec"] >= can["tec_warning"] and not in_can_startup_grace:
             severity = "HIGH" if row["can_tec"] >= can["tec_high"] else "MEDIUM"
             _hit(
                 hits, row, index, code="CAN_TEC_HIGH", severity=severity,
@@ -306,7 +310,7 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                 recommended_checks="로거 전원, CAN-H/L, 종단저항과 bitrate 확인",
                 confidence_pct=95, evidence={"can_tec": row["can_tec"]},
             )
-        if row["can_rec"] >= can["rec_warning"]:
+        if row["can_rec"] >= can["rec_warning"] and not in_can_startup_grace:
             severity = "HIGH" if row["can_rec"] >= can["rec_high"] else "MEDIUM"
             _hit(
                 hits, row, index, code="CAN_REC_HIGH", severity=severity,
@@ -379,13 +383,20 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                 recommended_checks="A4 전압과 포텐시오미터 커넥터 확인",
                 confidence_pct=98, evidence={"steer_actual_adc": actual_adc},
             )
-        if actual_adc < steering["safe_min_adc"] or actual_adc > steering["safe_max_adc"]:
+        safe_min_with_tolerance = (
+            steering["safe_min_adc"] - steering["safe_range_tolerance_adc"]
+        )
+        safe_max_with_tolerance = (
+            steering["safe_max_adc"] + steering["safe_range_tolerance_adc"]
+        )
+        if actual_adc < safe_min_with_tolerance or actual_adc > safe_max_with_tolerance:
             _hit(
                 hits, row, index, code="STEERING_SAFE_RANGE", severity="HIGH",
                 subsystem="조향", diagnosis="조향 안전 가동범위 이탈",
                 possible_causes="포텐시오미터 체결 이동·기계 끝단 초과·교정값 불일치",
-                recommended_checks="조향을 정지하고 실제 끝단과 180~1020 ADC 교정값 재확인",
+                recommended_checks="조향을 정지하고 기계 끝단과 200~1000 ADC 안전 명령범위 재확인",
                 confidence_pct=98,
+                min_duration_s=steering["safe_range_duration_s"],
                 evidence={
                     "steer_actual_adc": actual_adc,
                     "safe_min_adc": steering["safe_min_adc"],
@@ -393,10 +404,16 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                 },
             )
 
+        commanded_response = (
+            steering_diagnosis_enabled
+            and pwm_abs >= steering["active_pwm"]
+            and row["steering_response_direction"] > 0
+        )
         if (
             index > 0
             and row["sample_gap_s"] <= steering["sensor_jump_max_gap_s"]
             and abs(row["steering_actual_delta_adc"]) >= steering["sensor_jump_adc"]
+            and not commanded_response
         ):
             _hit(
                 hits, row, index, code="STEERING_SENSOR_JUMP", severity="HIGH",
@@ -411,11 +428,16 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                 },
             )
 
+        target_stable = (
+            index > 0
+            and abs(row["steering_target_delta_adc"])
+            <= steering["stable_target_delta_adc"]
+        )
         steering_active = (
             steering_diagnosis_enabled
             and pwm_abs >= steering["active_pwm"]
         )
-        if not steering_active:
+        if not steering_active or not target_stable:
             tracking_latched = False
         elif not tracking_latched and error_abs >= steering["tracking_error_adc"]:
             tracking_latched = True
@@ -431,10 +453,6 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                 confidence_pct=75,
                 min_duration_s=steering["tracking_error_duration_s"],
                 evidence={"error_adc": error_abs, "steer_pwm": row["steer_pwm"]},
-            )
-            target_stable = (
-                abs(row["steering_target_delta_adc"])
-                <= steering["stable_target_delta_adc"]
             )
             if (
                 index > 0
@@ -509,10 +527,23 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                 item["steer_actual_adc"] for item in stuck_rows
             )
             stuck_max_pwm = max(abs(item["steer_pwm"]) for item in stuck_rows)
+            stuck_active_rows = [
+                item
+                for item in stuck_rows
+                if abs(item["steer_pwm"]) >= steering["active_pwm"]
+            ]
+            stuck_active_duration = (
+                stuck_active_rows[-1]["_time_s"] - stuck_active_rows[0]["_time_s"]
+                if len(stuck_active_rows) >= 2
+                else 0.0
+            )
             if (
                 stuck_target_span >= steering["sensor_stuck_target_span_adc"]
                 and stuck_actual_span <= steering["sensor_stuck_actual_span_adc"]
                 and stuck_max_pwm >= steering["active_pwm"]
+                and len(stuck_active_rows) >= 3
+                and stuck_active_duration
+                >= steering["sensor_stuck_active_duration_s"]
             ):
                 _hit(
                     hits, row, index, code="STEERING_SENSOR_STUCK", severity="HIGH",
@@ -524,6 +555,7 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                         "target_span_adc": stuck_target_span,
                         "actual_span_adc": stuck_actual_span,
                         "max_steer_pwm": stuck_max_pwm,
+                        "active_duration_s": round(stuck_active_duration, 3),
                     },
                 )
 

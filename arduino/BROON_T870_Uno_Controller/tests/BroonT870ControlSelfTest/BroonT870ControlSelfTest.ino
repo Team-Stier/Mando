@@ -362,13 +362,37 @@ void testDriveNoFeedbackFaultLatchesSafetyState() {
   BroonT870::SafetyState state = {BroonT870::STATE_ARMED,
                                   BroonT870::FAULT_NONE, 0UL, false};
   BroonT870::SafetyInputs inputs = {
-      true,  true,  true,  false, true,  false, true,
+      true,  true,  true,  true,  false, true,  false, true,
       false, false, false, true,  BroonT870::MODE_ROS, 500U};
   BroonT870::SafetyResult result =
       BroonT870::updateSafetyState(state, inputs, 1000UL);
   expectEqual(F("no-feedback fault code"), result.activeFault,
               BroonT870::FAULT_DRIVE_NO_FEEDBACK);
   expectEqual(F("no-feedback immediate stop"), result.immediateStop, 1);
+}
+
+void testDriveNoFeedbackFaultCanRecoverWithoutLatch() {
+  BroonT870::SafetyState state = {BroonT870::STATE_ARMED,
+                                  BroonT870::FAULT_NONE, 0UL, false};
+  BroonT870::SafetyInputs inputs = {
+      true,  false, true,  true,  false, true,  false, true,
+      false, false, false, true,  BroonT870::MODE_ROS, 500U};
+  BroonT870::SafetyResult result =
+      BroonT870::updateSafetyState(state, inputs, 1000UL);
+  expectEqual(F("recoverable fault disarms"), result.state,
+              BroonT870::STATE_DISARMED);
+  expectEqual(F("recoverable fault is not latched"), state.latchedFault,
+              BroonT870::FAULT_NONE);
+  expectEqual(F("recoverable fault code reported"), result.activeFault,
+              BroonT870::FAULT_DRIVE_NO_FEEDBACK);
+
+  inputs.driveNoFeedbackFault = false;
+  result = BroonT870::updateSafetyState(state, inputs, 1100UL);
+  expectEqual(F("recovery starts neutral hold"), result.state,
+              BroonT870::STATE_DISARMED);
+  result = BroonT870::updateSafetyState(state, inputs, 1600UL);
+  expectEqual(F("recovery rearms after neutral"), result.state,
+              BroonT870::STATE_ARMED);
 }
 
 }  // namespace
@@ -385,6 +409,7 @@ void setup() {
   testSteeringHuntingSuppression();
   testSteeringEndpointHoldSelectionAndBehavior();
   testDriveNoFeedbackFaultLatchesSafetyState();
+  testDriveNoFeedbackFaultCanRecoverWithoutLatch();
   Serial.print(F("TOTAL pass="));
   Serial.print(passCount);
   Serial.print(F(" fail="));

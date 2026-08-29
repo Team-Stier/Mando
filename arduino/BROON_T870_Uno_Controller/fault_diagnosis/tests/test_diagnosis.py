@@ -113,11 +113,30 @@ class DiagnosisTest(unittest.TestCase):
     def test_detects_steering_sensor_jump_and_safe_range(self) -> None:
         rows = [normal_row(index) for index in range(12)]
         rows[5]["steer_actual_adc"] = 900
-        rows[6]["steer_actual_adc"] = 1021
+        for row in rows[6:11]:
+            row["steer_actual_adc"] = 1021
         result, _, _ = self.analyze(rows)
         codes = {event.code for event in result.events}
         self.assertIn("STEERING_SENSOR_JUMP", codes)
         self.assertIn("STEERING_SAFE_RANGE", codes)
+
+    def test_accepts_fast_commanded_steering_response(self) -> None:
+        rows = [normal_row(index) for index in range(20)]
+        rows[5]["steer_target_adc"] = 1000
+        rows[5]["steer_actual_adc"] = 650
+        rows[5]["steer_pwm"] = -210
+        rows[6]["steer_target_adc"] = 1000
+        rows[6]["steer_actual_adc"] = 950
+        rows[6]["steer_pwm"] = -210
+        for row in rows[7:]:
+            row["steer_target_adc"] = 1000
+            row["steer_actual_adc"] = 999
+            row["steer_pwm"] = 0
+        result, _, _ = self.analyze(rows)
+        codes = {event.code for event in result.events}
+        self.assertNotIn("STEERING_SENSOR_JUMP", codes)
+        self.assertNotIn("STEERING_TRACKING_ERROR", codes)
+        self.assertNotIn("STEERING_SENSOR_STUCK", codes)
 
     def test_detects_steering_sensor_stuck_across_command_changes(self) -> None:
         rows = [normal_row(index) for index in range(30)]
@@ -166,12 +185,12 @@ class DiagnosisTest(unittest.TestCase):
         self.assertIn("DRIVE_OVERSPEED", codes)
 
     def test_detects_can_and_rc_faults(self) -> None:
-        rows = [normal_row(index) for index in range(12)]
+        rows = [normal_row(index) for index in range(60)]
         rows[3]["complete"] = 0
         rows[4]["seq"] = 9
         rows[6]["tx_dropped"] = 2
         rows[7]["tx_dropped"] = 2
-        rows[8]["can_eflg"] = 32
+        rows[50]["can_eflg"] = 32
         for row in rows[5:10]:
             row["rc_flags"] = 0b0011
         result, _, _ = self.analyze(rows)
@@ -181,6 +200,16 @@ class DiagnosisTest(unittest.TestCase):
         self.assertIn("CAN_TX_DROP", codes)
         self.assertIn("CAN_ERROR_FLAG", codes)
         self.assertIn("RC_SIGNAL_INVALID", codes)
+
+    def test_ignores_can_error_counter_recovery_during_startup(self) -> None:
+        rows = [normal_row(index) for index in range(60)]
+        for index, row in enumerate(rows[:40]):
+            row["can_eflg"] = 5 if index < 8 else 0
+            row["can_tec"] = max(0, 118 - index * 6)
+        result, _, _ = self.analyze(rows)
+        codes = {event.code for event in result.events}
+        self.assertNotIn("CAN_ERROR_FLAG", codes)
+        self.assertNotIn("CAN_TEC_HIGH", codes)
 
     def test_writes_all_text_outputs(self) -> None:
         rows = [normal_row(index) for index in range(12)]

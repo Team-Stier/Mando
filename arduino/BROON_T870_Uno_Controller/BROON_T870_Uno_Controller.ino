@@ -31,6 +31,7 @@ using BroonT870::VehicleCommand;       // 차량 명령 타입 (속도, 조향, 
 using BroonT870::MODE_RC;              // RC 조종 모드를 나타내는 상수
 using BroonT870::MODE_ROS;             // ROS 자율주행 모드를 나타내는 상수
 using BroonT870::STATE_BOOT_LOCKED;    // 부팅 직후 잠금 상태 상수 (출력 금지)
+using BroonT870::STATE_DISARMED;       // fault 해제와 중립 확인을 기다리는 상태
 using BroonT870::STATE_FAULT_LATCHED;  // 오류 발생 후 잠금 상태 상수
 using BroonT870::FAULT_CONFIGURATION;  // 설정값 오류 코드 상수
 using BroonT870::FAULT_NONE;           // 오류 없음을 나타내는 상수
@@ -79,6 +80,8 @@ bool steeringSensorFault = false;       // 조향 센서 오류 발생 여부
 bool steeringStallFault = false;        // 조향 모터 막힘(스톨) 오류 발생 여부
 bool steeringRuntimeFault = false;      // 조향 실행 중 오류 발생 여부
 bool driveNoFeedbackFault = false;
+bool recoverableFaultHolding = false;
+uint32_t recoverableFaultSinceMs = 0UL;
 bool rcStopActive = true;               // 조종기 throttle-cut 또는 신호 손실 정지 상태(초기값: 정지)
 int16_t rosSpeedControlPwm = 0;
 int16_t latestDriveRequestedPwm = 0;
@@ -247,15 +250,28 @@ void forceAllOutputsOff() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 함수: 조향 오류를 기록하고 시스템을 잠금 상태로 전환 (재시작 전까지 복구 불가)
+// 함수: 오류를 기록하고 모든 출력을 즉시 차단
+//   래치 빌드에서는 state 3으로 유지하고, 무인 대회용 비래치 빌드에서는
+//   state 1로 전환해 고장 조건 해제 후 자동 재무장을 허용한다.
 //   fault : 발생한 오류 코드
 //   nowMs : 현재 시각(ms)
 // ─────────────────────────────────────────────────────────────────────────────
 void latchControllerFault(FaultCode fault, uint32_t nowMs) {
+#if BROON_ENABLE_LATCHED_FAULTS
   if (safetyState.latchedFault == FAULT_NONE) {
     safetyState.latchedFault = fault; // 첫 번째 오류만 기록 (나중 오류로 덮어쓰지 않음)
   }
   safetyState.state = STATE_FAULT_LATCHED; // 상태를 "오류 잠금"으로 변경
+#else
+  safetyState.latchedFault = FAULT_NONE;
+  safetyState.state = STATE_DISARMED;
+  if (!recoverableFaultHolding) {
+    recoverableFaultHolding = true;
+    recoverableFaultSinceMs = nowMs;
+  }
+#endif
+  safetyState.neutralTiming = false;
+  safetyResult = {safetyState.state, fault, false, true};
   outputsAllowed = false;                  // 모든 모터 출력 즉시 금지
   BroonT870::resetSteeringWatchdog(steeringWatchdogState,
                                    latestSteeringAdc, nowMs); // 조향 워치독 초기화
@@ -385,12 +401,25 @@ void updateSafety(uint32_t nowMs) {
     return; // 주기가 아니면 아무것도 안 함
   }
 
+#if !BROON_ENABLE_LATCHED_FAULTS
+  if (recoverableFaultHolding &&
+      BroonT870::hasElapsed(nowMs, recoverableFaultSinceMs,
+                            BroonT870Controller::kRecoverableFaultHoldMs)) {
+    steeringSensorFault = false;
+    steeringStallFault = false;
+    steeringRuntimeFault = false;
+    driveNoFeedbackFault = false;
+    recoverableFaultHolding = false;
+  }
+#endif
+
   const bool throttleNeutral = activeCommand.valid &&
       (selectedMode == MODE_ROS
            ? activeCommand.targetSpeedKph <= 0.0f
            : BroonT870::signOf(activeCommand.drivePwm) == 0);
   const SafetyInputs inputs = {
       BROON_ENABLE_ACTUATOR_OUTPUTS != 0,         // 빌드 설정에서 출력 허용?
+      BROON_ENABLE_LATCHED_FAULTS != 0,           // fault를 state 3으로 영구 잠금?
       BROON_STEERING_CALIBRATION_CONFIRMED != 0,  // 조향 보정 확인됨?
       configurationValid,                         // 설정값 전체 유효?
       rcStopActive,                               // 조종기 throttle-cut 또는 신호 손실 정지?
@@ -407,7 +436,7 @@ void updateSafety(uint32_t nowMs) {
   safetyResult = BroonT870::updateSafetyState(safetyState, inputs, nowMs); // 모든 입력을 종합해 안전 판단
   outputsAllowed = safetyResult.outputsAllowed; // 판단 결과에 따라 출력 허용 여부 업데이트
   if (safetyResult.immediateStop || !outputsAllowed) { // 즉시 정지 명령이거나 출력 금지면
-    if (safetyResult.state == STATE_FAULT_LATCHED) resetRosSpeedControl();
+    if (safetyResult.activeFault != FAULT_NONE) resetRosSpeedControl();
     forceAllOutputsOff(); // 모든 모터 즉시 정지
   }
 }
@@ -689,7 +718,7 @@ void publishOrPrintStatus(uint32_t nowMs) {
 }
 
 // CAN은 이미 계산된 상태만 복사해 송신한다. CAN 초기화·송신 실패는
-// 명령, fault latch, 출력 허용 여부를 바꾸지 않는다.
+// 명령, fault 정책, 출력 허용 여부를 바꾸지 않는다.
 void publishCanTelemetry(uint32_t nowMs) {
   uint8_t statusFlags = 0U;
   if (outputsAllowed) statusFlags |= T870Can::STATUS_OUTPUTS_ALLOWED;

@@ -53,18 +53,23 @@ constexpr float countsPerWheelRev = 300.0f;
 // Provisional geometric circumference from the measured 270 mm diameter.
 // Replace with the loaded one-revolution rollout distance for final accuracy.
 constexpr float wheelCircumferenceM = 0.84823f;
-// User-confirmed commanded range. Mechanical and commanded endpoints are
-// intentionally identical, so there is no additional software endpoint
-// margin; test the first motion with the wheels unloaded.
-constexpr SteeringCalibration kSteeringCalibration = {1020, 1020, 600, 180,
+// The 2026-08-29 full-sweep RC log reached about 189..1021 ADC. Keep the
+// previously confirmed mechanical bounds, but command about 20 ADC inside
+// them so normal overshoot cannot drive the steering gear against an end stop.
+// The center value is the unloaded straight-ahead value observed after the
+// same test. Recheck these values if the potentiometer coupling is disturbed.
+constexpr SteeringCalibration kSteeringCalibration = {1020, 1000, 592, 200,
                                                        180, false};
 
 // RC wiring: steering=A0, throttle=A1, mode/AUX=A2. Steering and throttle
 // values came from the reference sketch; AUX endpoints were measured on the
 // installed DX3. Its observed 1090/1450/1890 us positions are accepted with
 // margin so normal pulse jitter does not invalidate either endpoint.
-constexpr BroonT870::RcChannelCalibration kRcSteerCalibration = {1100, 1450,
-                                                                  1800};
+// Full-sweep values measured in the 2026-08-29 RC/CAN log were approximately
+// 994/1450/1986 us. Use rounded repeatable endpoints while retaining the
+// measured neutral value.
+constexpr BroonT870::RcChannelCalibration kRcSteerCalibration = {995, 1450,
+                                                                  1985};
 constexpr BroonT870::RcChannelCalibration kRcThrottleCalibration = {
     1050, 1450, 1850};
 constexpr BroonT870::RcChannelCalibration kRcAuxCalibration = {1050, 1450,
@@ -97,6 +102,9 @@ constexpr uint8_t kDriveFeedbackMinimumPwm = 60U;
 // not yet verified.
 constexpr uint16_t kDriveNoFeedbackTimeoutMs = 0U;
 constexpr uint16_t kNeutralHoldMs = 500U;
+// In non-latching competition mode, retain the fault long enough for CAN and
+// serial telemetry before testing whether the physical condition has cleared.
+constexpr uint16_t kRecoverableFaultHoldMs = 1000U;
 constexpr uint16_t kDirectionInterlockMs = 300U;
 constexpr uint16_t kSteeringNoProgressMs = 1000U;
 // Zero disables the fixed continuous-runtime fault. Stall detection below

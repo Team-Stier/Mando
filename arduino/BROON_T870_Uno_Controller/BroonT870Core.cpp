@@ -212,7 +212,7 @@ VehicleCommand selectActiveCommand(const VehicleCommand& rcCommand,
 
 SafetyResult updateSafetyState(SafetyState& state, const SafetyInputs& inputs,
                                uint32_t nowMs) {
-  FaultCode fault = state.latchedFault;
+  FaultCode fault = inputs.latchFaults ? state.latchedFault : FAULT_NONE;
   if (fault == FAULT_NONE && inputs.steeringSensorFault)
     fault = FAULT_STEERING_SENSOR;
   if (fault == FAULT_NONE && inputs.steeringStallFault)
@@ -225,8 +225,8 @@ SafetyResult updateSafetyState(SafetyState& state, const SafetyInputs& inputs,
       (!inputs.steeringCalibrationConfirmed || !inputs.configurationValid))
     fault = FAULT_CONFIGURATION;
   if (fault != FAULT_NONE) {
-    state.latchedFault = fault;
-    state.state = STATE_FAULT_LATCHED;
+    state.latchedFault = inputs.latchFaults ? fault : FAULT_NONE;
+    state.state = inputs.latchFaults ? STATE_FAULT_LATCHED : STATE_DISARMED;
     state.neutralTiming = false;
     return {state.state, fault, false, true};
   }

@@ -55,6 +55,7 @@ struct SafetyState {
 
 struct SafetyInputs {
   bool actuatorOutputsEnabled;
+  bool latchFaults;
   bool steeringCalibrationConfirmed;
   bool configurationValid;
   bool remoteStopActive;
