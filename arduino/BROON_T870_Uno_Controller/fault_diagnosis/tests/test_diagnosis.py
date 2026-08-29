@@ -138,6 +138,34 @@ class DiagnosisTest(unittest.TestCase):
         self.assertNotIn("STEERING_TRACKING_ERROR", codes)
         self.assertNotIn("STEERING_SENSOR_STUCK", codes)
 
+    def test_accepts_arrival_sample_after_steering_pwm_turns_off(self) -> None:
+        rows = [normal_row(index) for index in range(14)]
+        rows[5]["steer_target_adc"] = 480
+        rows[5]["steer_actual_adc"] = 656
+        rows[5]["steer_pwm"] = 210
+        rows[6]["steer_target_adc"] = 413
+        rows[6]["steer_actual_adc"] = 405
+        rows[6]["steer_pwm"] = 0
+        for row in rows[7:]:
+            row["steer_target_adc"] = 413
+            row["steer_actual_adc"] = 410
+            row["steer_pwm"] = 0
+        result, _, _ = self.analyze(rows)
+        codes = {event.code for event in result.events}
+        self.assertNotIn("STEERING_SENSOR_JUMP", codes)
+
+    def test_still_detects_jump_after_previous_pwm_in_wrong_direction(self) -> None:
+        rows = [normal_row(index) for index in range(14)]
+        rows[5]["steer_target_adc"] = 480
+        rows[5]["steer_actual_adc"] = 656
+        rows[5]["steer_pwm"] = 210
+        rows[6]["steer_target_adc"] = 480
+        rows[6]["steer_actual_adc"] = 930
+        rows[6]["steer_pwm"] = 0
+        result, _, _ = self.analyze(rows)
+        codes = {event.code for event in result.events}
+        self.assertIn("STEERING_SENSOR_JUMP", codes)
+
     def test_detects_steering_sensor_stuck_across_command_changes(self) -> None:
         rows = [normal_row(index) for index in range(30)]
         for index, row in enumerate(rows[4:24], start=4):

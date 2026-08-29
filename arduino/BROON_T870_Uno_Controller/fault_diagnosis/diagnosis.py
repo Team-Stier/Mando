@@ -409,11 +409,37 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
             and pwm_abs >= steering["active_pwm"]
             and row["steering_response_direction"] > 0
         )
+        previous_commanded_response = False
+        previous_steer_pwm = 0
+        previous_error_adc = 0
+        previous_error_after_move_adc = 0
+        if index > 0:
+            previous = rows[index - 1]
+            previous_flags = previous["status_flags"]
+            previous_steer_pwm = previous["steer_pwm"]
+            previous_error_adc = (
+                previous["steer_target_adc"] - previous["steer_actual_adc"]
+            )
+            previous_error_after_move_adc = (
+                previous["steer_target_adc"] - row["steer_actual_adc"]
+            )
+            previous_steering_diagnosis_enabled = bool(
+                (previous_flags & (1 << 0))
+                and (previous_flags & (1 << 3))
+                and not (previous_flags & (1 << 1))
+            )
+            previous_commanded_response = (
+                previous_steering_diagnosis_enabled
+                and abs(previous_steer_pwm) >= steering["active_pwm"]
+                and previous_error_adc * row["steering_actual_delta_adc"] > 0
+                and abs(previous_error_after_move_adc) < abs(previous_error_adc)
+            )
         if (
             index > 0
             and row["sample_gap_s"] <= steering["sensor_jump_max_gap_s"]
             and abs(row["steering_actual_delta_adc"]) >= steering["sensor_jump_adc"]
             and not commanded_response
+            and not previous_commanded_response
         ):
             _hit(
                 hits, row, index, code="STEERING_SENSOR_JUMP", severity="HIGH",
@@ -425,6 +451,9 @@ def evaluate_rules(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[H
                     "actual_delta_adc": row["steering_actual_delta_adc"],
                     "sample_gap_s": round(row["sample_gap_s"], 3),
                     "actual_rate_adc_s": row["steering_actual_rate_adc_s"],
+                    "previous_steer_pwm": previous_steer_pwm,
+                    "previous_error_adc": previous_error_adc,
+                    "previous_error_after_move_adc": previous_error_after_move_adc,
                 },
             )
 
