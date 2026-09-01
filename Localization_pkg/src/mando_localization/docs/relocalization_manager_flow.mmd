@@ -1,0 +1,56 @@
+---
+config:
+  layout: dagre
+  flowchart:
+    curve: stepAfter
+    nodeSpacing: 48
+    rankSpacing: 58
+---
+flowchart LR
+  title["Relocalization Manager<br/>간단 아키텍처 Flow"]
+
+  inputs["입력<br/>GPS gate pose / candidate<br/>LiDAR pose · Vehicle speed · Global Odom"]
+
+  subgraph supervisor_process["localization_supervisor process"]
+    direction LR
+    coordinator["RelocalizationCoordinator<br/>입력 상태 확인 · 복구 조정"]
+    outage{"GPS 정상 추적<br/>또는 장기 단절?"}
+    normal["정상 경로<br/>gate pose relay"]
+    strategy{"복구 기준 선택"}
+    lidar_recovery["LiDAR 보조 복구<br/>GPS–LiDAR 일치 확인"]
+    gps_recovery["GPS-only 복구<br/>Global EKF reset<br/>기본 비활성"]
+    reanchor["GPS Gate reanchor<br/>transaction ACK"]
+    supervisor["LocalizationSupervisor<br/>복구 중 RELOCALIZING<br/>valid=false"]
+
+    coordinator --> outage
+    outage -- "정상" --> normal
+    outage -- "장기 단절" --> strategy
+    strategy -- "LiDAR 사용 가능" --> lidar_recovery --> reanchor
+    strategy -- "LiDAR 없음" --> gps_recovery --> reanchor
+    coordinator -. "recovery active" .-> supervisor
+  end
+
+  approved_pose["승인 GPS map pose"]
+  global_ekf["Global EKF<br/>map → odom"]
+  output_gate["LocalizationOutputGate<br/>state + Global Odom 검사"]
+  final_odom["최종 위치 출력<br/>/molit/localization/odometry"]
+
+  title --> inputs --> coordinator
+  normal --> approved_pose
+  reanchor --> approved_pose
+  approved_pose --> global_ekf --> output_gate --> final_odom
+  supervisor -. "state / valid" .-> output_gate
+
+  classDef source fill:#e8f1ff,stroke:#3973ac,color:#10263d,stroke-width:1px
+  classDef process fill:#eaf7ed,stroke:#3e8a50,color:#12351b,stroke-width:1px
+  classDef decision fill:#fff2cc,stroke:#bf9000,color:#3d2e00,stroke-width:2px
+  classDef recovery fill:#e7f7f5,stroke:#258b7c,color:#123c36,stroke-width:2px
+  classDef safety fill:#fde9e7,stroke:#c74440,color:#4b1110,stroke-width:2px
+  classDef output fill:#f0e8ff,stroke:#7651a8,color:#26173d,stroke-width:1px
+
+  class inputs source
+  class coordinator,normal process
+  class outage,strategy decision
+  class lidar_recovery,gps_recovery,reanchor recovery
+  class supervisor,output_gate safety
+  class title,approved_pose,global_ekf,final_odom output

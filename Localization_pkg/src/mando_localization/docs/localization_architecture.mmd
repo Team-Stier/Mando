@@ -1,0 +1,77 @@
+---
+config:
+  layout: dagre
+  flowchart:
+    curve: stepAfter
+    nodeSpacing: 30
+    rankSpacing: 38
+---
+flowchart TB
+  subgraph local_stage["1–3. 로컬 위치 예측"]
+    direction LR
+    motion_sensors["1. 센서 입력<br/>/molit/sensors/imu/data<br/>/erp42_serial/feedback<br/>SerialFeedBack: speed·steer·encoder·alive"]
+    motion_adapter["2. 검증·변환<br/>IMU 시간·frame·공분산 검사<br/>Serial alive·속도·ADC·delta 검사<br/>speed → Twist.linear.x"]
+    local_ekf["3. Local EKF<br/>yaw·yaw rate + 전진 속도 융합<br/>연속 이동 예측<br/>TF: odom → base_link"]
+    motion_sensors --> motion_adapter --> local_ekf
+  end
+
+  subgraph correction_stage["4. 절대 위치 독립 보정"]
+    direction LR
+    absolute_sources["GPS: 위·경도<br/>LiDAR: LaserScan<br/>기존 OccupancyGrid"]
+    absolute_correction["GPS: WGS84 → map 투영<br/>승인 전 candidate + 거리·Mahalanobis 검사<br/>LiDAR: scan 검사 → AMCL 정합<br/>pose 점프·공분산·연속 안정성 검사<br/>AMCL tf_broadcast: false"]
+    absolute_sources --> absolute_correction
+  end
+
+  global_ekf["5. Global EKF<br/>IMU·Twist로 움직임 예측<br/>승인 GPS(x,y)·LiDAR(x,y,yaw)로 보정<br/>Local Odom 직접 융합 안 함<br/>TF: map → odom"]
+
+  subgraph safety_stage["6–7. 복구 조정·상태 판단과 안전 출력"]
+    direction LR
+    subgraph supervisor_process["localization_supervisor ROS process"]
+      direction LR
+      diagnostics["6. 센서·필터 진단<br/>age · covariance<br/>소스 간·Global 일관성"]
+      recovery_coordinator["RelocalizationCoordinator<br/>긴 단절 > 2 s: 증가 GPS 후보↔fresh LiDAR 3회<br/>LiDAR stamp 독립성·EKF 수용 ACK는 미확인<br/>GpsGateReanchor transaction ACK 뒤 공개<br/>GPS-only 자동 reset 기본 false"]
+      status_manager["LocalizationStatusManager<br/>센서 freshness와 상태 후보 평가<br/>내부 evaluated status / state / valid"]
+      supervisor["LocalizationSupervisor<br/>평가 + recovery heartbeat 최종 중재<br/>0.5 s stale → FAULT<br/>공개 state / valid / status 단일 소유"]
+      diagnostics -.-> status_manager
+      recovery_coordinator -. "recovery state / active" .-> supervisor
+      status_manager -. "evaluated status / state / valid" .-> supervisor
+    end
+    output_gate["7. LocalizationOutputGate<br/>valid + 최신 Global Odom 재검사<br/>실패 시 출력 차단(fail-closed)"]
+    supervisor -. "valid / invalid" .-> output_gate
+  end
+
+  subgraph view_stage["8. 한 창 시각화"]
+    direction LR
+    visualization["최종 위치 누적 → Path<br/>차량·GPS·LiDAR → Markers"]
+    tf_contract["TF 설정<br/>base_link = 뒷바퀴 축<br/>IMU +0.25 m · LiDAR +1.05 m"]
+    rviz["RViz<br/>지도 · 위치 · 경로 · TF · 한국어 상태"]
+    visualization --> rviz
+    tf_contract --> rviz
+  end
+
+  local_stage -->|"Local Odom: GPS 비교 전용"| correction_stage
+  motion_adapter -. "Twist 정지 조건" .-> recovery_coordinator
+  absolute_correction -. "quality candidate / normal gate pose + LiDAR pose" .-> recovery_coordinator
+  recovery_coordinator -. "GpsGateReanchor command" .-> absolute_correction
+  absolute_correction -. "동일 transaction 적용 ACK" .-> recovery_coordinator
+  absolute_correction -->|"승인 LiDAR pose"| global_ekf
+  recovery_coordinator -->|"Coordinator 승인 GPS pose"| global_ekf
+  recovery_coordinator -. "GPS-only global_set_pose · 기본 false" .-> global_ekf
+  global_ekf -. "post-reset Global Odom 3회 확인" .-> recovery_coordinator
+  global_ekf -->|"Global Odom"| output_gate
+  output_gate -->|"/molit/localization/odometry"| visualization
+  supervisor -. "state / valid / status" .-> rviz
+
+  classDef sensor fill:#e8f1ff,stroke:#3973ac,color:#10263d,stroke-width:1px
+  classDef adapter fill:#eaf7ed,stroke:#3e8a50,color:#12351b,stroke-width:1px
+  classDef filter fill:#fff2cc,stroke:#bf9000,color:#3d2e00,stroke-width:2px
+  classDef correction fill:#e7f7f5,stroke:#258b7c,color:#123c36,stroke-width:1px
+  classDef safety fill:#fde9e7,stroke:#c74440,color:#4b1110,stroke-width:2px
+  classDef view fill:#f0e8ff,stroke:#7651a8,color:#26173d,stroke-width:1px
+
+  class motion_sensors,absolute_sources sensor
+  class motion_adapter adapter
+  class local_ekf,global_ekf filter
+  class absolute_correction correction
+  class diagnostics,recovery_coordinator,status_manager,supervisor,output_gate safety
+  class visualization,tf_contract,rviz view

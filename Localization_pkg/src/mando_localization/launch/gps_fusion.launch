@@ -1,0 +1,16 @@
+<launch>
+  <arg name="enable_gps_fusion" default="true"/>
+  <arg name="interfaces_config" default="$(find mando_localization)/config/localization_interfaces.yaml"/>
+  <arg name="gps_reference_config" default="$(find mando_localization)/config/gps_reference.yaml"/>
+  <arg name="status_policy_config" default="$(find mando_localization)/config/status_policy.yaml"/>
+  <arg name="gps_quality_gate_node_name" default="odometry_gps_fusion"/>
+
+  <group if="$(arg enable_gps_fusion)">
+    <node pkg="mando_localization" type="odometry_gps_fusion_node"
+          name="$(arg gps_quality_gate_node_name)" output="screen" clear_params="true">
+      <rosparam command="load" file="$(arg interfaces_config)"/>
+      <rosparam command="load" file="$(arg gps_reference_config)"/>
+      <rosparam command="load" file="$(arg status_policy_config)"/>
+    </node>
+  </group>
+</launch>

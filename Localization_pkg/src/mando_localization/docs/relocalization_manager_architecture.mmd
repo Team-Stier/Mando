@@ -1,0 +1,134 @@
+---
+config:
+  layout: dagre
+  flowchart:
+    curve: stepAfter
+    nodeSpacing: 40
+    rankSpacing: 55
+---
+flowchart TB
+  title["Relocalization Manager 상세 아키텍처<br/>RelocalizationCoordinator + RelocalizationPolicy<br/>현재 YAML 기본값 · 장기 GPS 단절 복구 전용 · fail-closed"]
+
+  runtime["실행 경계<br/>별도 relocalization 노드가 아님<br/>localization_supervisor_node 안에서 StatusManager·Supervisor와 함께 단일 ros::spin"]
+
+  subgraph manager["Relocalization Manager"]
+    direction TB
+
+    ingress["1. ROS 입력 callback + cache<br/><b>GPS gate</b>: candidate_pose · gate_pose · gate_relocalizing · reanchor_accepted<br/><b>절대/차량</b>: lidar/map_pose · vehicle/twist · global/odometry<br/>Pose / Twist / Odometry는 receipt time과 원본 stamp를 따로 보관"]
+
+    validate["2. 공통 pose 계약 검사<br/>frame=map · stamp≠0 · finite XYZ · 유효 quaternion<br/>XY covariance finite/non-negative<br/>candidate age ≤ 1.0 s · future ≤ 0.10 s<br/>LiDAR/Twist/Global freshness는 receipt age + stamp age 동시 확인"]
+
+    subgraph normal["정상·단기 GPS gate 경로"]
+      direction LR
+      normal_gate["정상 gate pose<br/>/mando_localization/internal/gps/gate_pose"]
+      normal_commit["즉시 승인 GPS pose relay<br/>have_prior_anchor=true<br/>last_gate_pose_receipt=now<br/>cluster·pending 초기화<br/>TRACKING · active=false"]
+      short_recovery["gate_relocalizing Bool<br/>true → SHORT_RECOVERY · active=true<br/>false → TRACKING · active=false"]
+      normal_gate --> normal_commit
+    end
+
+    long_guard{"3. 장기 복구 진입?<br/>quality candidate 수신<br/>이전 승인 anchor 있음<br/>마지막 gate 승인 후 > 2.0 s<br/>reset/reanchor pending 아님"}
+    keep_current["아니오<br/>기존 GPS gate·StatusManager 정책 유지<br/>Coordinator가 GPS pose를 우회 생성하지 않음"]
+    activate["예 · recovery_active=true<br/>후보 stamp는 엄격히 증가<br/>첫 후보 기준 cluster radius ≤ 2.0 m<br/>중복·역행 stamp/불일치 → count=0<br/>branch 전환/cluster 이탈 → 현재 후보부터 count=1"]
+
+    policy["RelocalizationPolicy · 순수 결정 로직<br/>Observation → RecoveryAction + state + reason<br/>NONE · ACCEPT_WITH_LIDAR · RESET_WITH_GPS<br/>ROS publish/service/cache는 Coordinator 책임"]
+
+    lidar_available{"4. fresh + time-aligned LiDAR pair?<br/>enable_lidar=true<br/>LiDAR receipt/stamp age ≤ 0.50 s<br/>GPS↔LiDAR stamp skew ≤ 0.20 s"}
+
+    subgraph recovery_branches["복구 전략 · LiDAR가 있으면 반드시 우선"]
+      direction LR
+
+      subgraph lidar_branch["4A. LiDAR 보조"]
+        direction TB
+        lidar_compare{"GPS↔LiDAR XY ≤ 5.0 m?"}
+        lidar_mismatch["LIDAR_MISMATCH<br/>count reset · active=true<br/>GPS-only로 우회하지 않음"]
+        lidar_count{"증가 GPS epoch가<br/>2.0 m cluster 안에서<br/>LiDAR와 3회 연속 일치?"}
+        lidar_validate["VALIDATING_LIDAR<br/>추가 pair 대기<br/>GPS 출력 차단"]
+        lidar_ready["LIDAR_RECOVERY_READY<br/>Global EKF reset 없음<br/>reanchor handshake로 이동"]
+        lidar_compare -- "아니오" --> lidar_mismatch
+        lidar_compare -- "예" --> lidar_count
+        lidar_count -- "아니오" --> lidar_validate
+        lidar_count -- "예" --> lidar_ready
+      end
+
+      subgraph gps_only_branch["4B. GPS-only · LiDAR pair 없음"]
+        direction TB
+        gps_prerequisites{"모든 GPS-only 사전조건 만족?<br/>automatic_reset_enabled=true · 기본 false<br/>require_measured_datum → reference.measured=true<br/>fresh Twist age ≤ 0.20 s · |vx| ≤ 0.30 m/s<br/>fresh Global Odom age ≤ 0.20 s"}
+        gps_blocked["조건별 fail-closed 상태<br/>GPS_ONLY_BLOCKED<br/>GPS_ONLY_BLOCKED_DATUM<br/>WAITING_FOR_STATIONARY<br/>WAITING_FOR_GLOBAL_ODOMETRY"]
+        gps_count{"정지 상태 증가 GPS 후보<br/>2.0 m cluster 안에서 5회 연속?"}
+        gps_validate["VALIDATING_GPS_ONLY<br/>추가 안정 후보 대기"]
+        set_pose["5. Global EKF SetPose<br/>/mando_localization/internal/ekf/global_set_pose<br/>service 존재 대기 ≤ 0.30 s<br/>candidate XY/XY covariance 적용<br/>최신 Global Z/yaw/나머지 covariance 유지<br/>동기 call 자체 hard timeout 없음"]
+        global_confirm{"post-reset Global 확인<br/>stamp ≥ reset request · target XY ≤ 2.0 m<br/>fresh + 서로 다른 증가 stamp 3회 연속<br/>timeout 1.0 s · 중간 불일치면 count reset"}
+        gps_ready["GPS_ONLY_RESET_READY<br/>→ WAITING_FOR_GLOBAL_CONFIRMATION<br/>확인 완료 후 reanchor handshake"]
+        reset_failure["SET_POSE_SERVICE_UNAVAILABLE<br/>SET_POSE_CALL_FAILED<br/>GLOBAL_CONFIRMATION_TIMEOUT<br/>active=true 유지"]
+        gps_prerequisites -- "아니오" --> gps_blocked
+        gps_prerequisites -- "예" --> gps_count
+        gps_count -- "아니오" --> gps_validate
+        gps_count -- "예" --> set_pose --> global_confirm
+        global_confirm -- "3회 확인" --> gps_ready
+        set_pose -. "실패" .-> reset_failure
+        global_confirm -. "timeout" .-> reset_failure
+      end
+    end
+
+    reanchor["6. 공통 GPS Gate reanchor command<br/>/mando_localization/internal/gps/reanchor_pose<br/>GpsGateReanchor transaction_id + target pose<br/>WAITING_FOR_GPS_GATE_REANCHOR · reanchor_pending=true<br/>Gate 검사: 최신 candidate와 ≤ 2.0 m · stamp gap ≤ 1.0 s · fresh Local Odom<br/>prediction anchor 실제 적용 후에만 ACK"]
+    ack_check{"7. /mando_localization/internal/gps/reanchor_accepted<br/>ACK pose 계약 유효?<br/>transaction_id 정확히 일치<br/>stamp gap ≤ 1e-6 s · XY gap ≤ 1e-6 m<br/>timeout 1.0 s 이내?"}
+    ack_wait["불일치 ACK: 계속 대기<br/>timeout → GPS_GATE_REANCHOR_TIMEOUT<br/>active=true · GPS pose 계속 차단<br/>timeout 뒤 late/duplicate ACK 무시"]
+    finish["finishRecovery<br/>/molit/localization/gps/map_pose 발행<br/>승인 GPS pose의 단일 발행자<br/>pending·counter·cluster 초기화<br/>RECOVERED_WITH_LIDAR 또는<br/>RECOVERED_WITH_GPS_RESET · active=false"]
+
+    timer["상시 20 Hz timer / watchdog / heartbeat<br/>/molit/localization/recovery/state · String latched<br/>/mando_localization/internal/recovery/active · Bool latched<br/>/mando_localization/internal/gps/relocalizing · Bool latched<br/>Global 확인·reanchor ACK timeout 감시"]
+
+    memory["내부 상태<br/>have_prior_anchor · last gate receipt<br/>candidate cluster/count/last stamp<br/>reset_pending + target + Global confirmations<br/>reanchor_pending + transaction + target"]
+
+    ingress --> validate
+    validate --> normal_gate
+    validate -. "gate_relocalizing" .-> short_recovery
+    validate --> long_guard
+    long_guard -- "아니오" --> keep_current
+    long_guard -- "예" --> activate --> lidar_available
+    policy -. "branch 판단 구현" .-> lidar_available
+    lidar_available -- "예" --> lidar_compare
+    lidar_available -- "아니오" --> gps_prerequisites
+    lidar_ready --> reanchor
+    gps_ready --> reanchor
+    reanchor --> ack_check
+    ack_check -- "아니오 / timeout" --> ack_wait
+    ack_check -- "예" --> finish
+    memory -.-> activate
+    memory -.-> reanchor
+    timer -.-> memory
+  end
+
+  subgraph downstream["안전 출력 연결"]
+    direction LR
+    gps_output["승인 GPS pose<br/>/molit/localization/gps/map_pose<br/>→ InterfaceAdapter<br/>→ /mando_localization/internal/ekf/gps_pose<br/>→ Global EKF GPS 입력"]
+    status_manager["LocalizationStatusManager · 같은 process<br/>gps_relocalizing + 승인 GPS pose 관찰<br/>evaluated state / valid 생성"]
+    supervisor["LocalizationSupervisor · 같은 process<br/>recovery heartbeat age ≤ 0.50 s<br/>active=true → RELOCALIZING, valid=false<br/>heartbeat 누락/stale → FAULT, valid=false"]
+    output_gate["LocalizationOutputGate · 별도 node<br/>valid=false 또는 stale이면<br/>Global Odom이 있어도 최종<br/>/molit/localization/odometry 차단"]
+    status_manager -. "evaluated state / valid" .-> supervisor
+    supervisor --> output_gate
+  end
+
+  limitations["현재 구현 경계<br/>LiDAR 자체 stamp 증가를 요구하지 않아 fresh/skew 범위에서 같은 pose 재사용 가능<br/>LiDAR 측정의 Global EKF 내부 수용 ACK 없음 · LiDAR 경로는 Global set_pose를 하지 않음<br/>datum은 measured bool만 확인 · mode/source 재검증 없음<br/>SetPose 동기 call hard timeout 없음 · single-thread heartbeat 지연 가능<br/>GPS callback 완전 중단은 Coordinator가 아니라 StatusManager의 DEAD_RECKONING/FAULT 경로"]
+
+  title --> runtime --> ingress
+  normal_commit --> gps_output
+  finish --> gps_output
+  timer -. "GPS relocalizing" .-> status_manager
+  timer -. "recovery active heartbeat" .-> supervisor
+  output_gate --> limitations
+
+  classDef source fill:#e8f1ff,stroke:#3973ac,color:#10263d,stroke-width:1px
+  classDef process fill:#eaf7ed,stroke:#3e8a50,color:#12351b,stroke-width:1px
+  classDef decision fill:#fff2cc,stroke:#bf9000,color:#3d2e00,stroke-width:2px
+  classDef blocked fill:#fde9e7,stroke:#c74440,color:#4b1110,stroke-width:2px
+  classDef handshake fill:#e7f7f5,stroke:#258b7c,color:#123c36,stroke-width:2px
+  classDef output fill:#f0e8ff,stroke:#7651a8,color:#26173d,stroke-width:1px
+  classDef note fill:#fff4f2,stroke:#d35400,color:#5a2600,stroke-width:2px
+
+  class runtime,ingress,normal_gate source
+  class validate,normal_commit,short_recovery,activate,policy,lidar_validate,lidar_ready,gps_validate,set_pose,global_confirm,gps_ready,timer,memory process
+  class long_guard,lidar_available,lidar_compare,lidar_count,gps_prerequisites,gps_count,ack_check decision
+  class lidar_mismatch,gps_blocked,reset_failure,ack_wait,output_gate blocked
+  class reanchor,finish handshake
+  class keep_current,gps_output,status_manager,supervisor output
+  class limitations note

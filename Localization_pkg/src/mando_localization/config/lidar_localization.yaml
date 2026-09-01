@@ -1,0 +1,64 @@
+# map_server/AMCL은 launch에서 enable_lidar_localization=true일 때만 시작한다.
+use_map_topic: true
+tf_broadcast: false
+global_frame_id: map
+odom_frame_id: odom
+base_frame_id: base_link
+transform_tolerance: 0.20
+gui_publish_rate: 5.0
+save_pose_rate: 0.5
+
+odom_model_type: diff
+odom_alpha1: 0.2
+odom_alpha2: 0.2
+odom_alpha3: 0.2
+odom_alpha4: 0.2
+odom_alpha5: 0.1
+
+laser_model_type: likelihood_field
+laser_max_beams: 60
+laser_min_range: 0.05
+laser_max_range: 30.0
+laser_z_hit: 0.80
+laser_z_short: 0.05
+laser_z_max: 0.05
+laser_z_rand: 0.10
+laser_sigma_hit: 0.20
+laser_lambda_short: 0.10
+laser_likelihood_max_dist: 2.0
+
+min_particles: 500
+max_particles: 3000
+kld_err: 0.05
+kld_z: 0.99
+update_min_d: 0.10
+update_min_a: 0.10
+resample_interval: 1
+recovery_alpha_slow: 0.0
+recovery_alpha_fast: 0.0
+
+scan_validation:
+  timeout_sec: 0.30
+  min_range_count: 20
+  min_finite_ratio: 0.50
+  require_laser_frame: true
+
+quality:
+  pose_max_message_age_sec: 0.50
+  max_future_stamp_sec: 0.10
+  max_position_variance_m2: 4.0
+  max_yaw_variance_rad2: 0.2741556778
+  max_pose_jump_m: 3.0
+  max_yaw_jump_rad: 0.7853981634
+  stable_candidate_radius_m: 1.0
+  stable_candidate_yaw_rad: 0.35
+  min_quaternion_norm: 0.000000000001
+  max_quaternion_normalization_error: 0.001
+
+initialization:
+  use_gps_initialpose: true
+  # 단독 GPS에는 heading이 없으므로 0 rad는 넓은 분산을 가진 중립 초기값일 뿐이다.
+  # 실측 heading을 사용할 때 yaw와 분산을 함께 교체하고 calibration_state를 갱신한다.
+  gps_initial_yaw_rad: 0.0
+  gps_initial_yaw_variance_rad2: 9.8696044011
+  gps_initial_yaw_calibration_state: unmeasured
