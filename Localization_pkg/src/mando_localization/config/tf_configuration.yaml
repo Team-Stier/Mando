@@ -1,0 +1,48 @@
+schema_version: 1
+strict_validation: true
+
+# base_link 원점은 차량 뒷바퀴 축 중심이며 REP-103 축을 사용한다.
+base_link_reference:
+  origin: rear_axle_center
+  x_axis: forward
+  y_axis: left
+  z_axis: up
+
+# 동적 TF는 이 파일에서 값이 아니라 단일 소유자만 선언한다.
+dynamic_transforms:
+  - parent_frame: map
+    child_frame: odom
+    owner_node: odometry_gps_lidar_global_ekf
+    source: robot_localization_global
+  - parent_frame: odom
+    child_frame: base_link
+    owner_node: imu_encoder_local_ekf
+    source: robot_localization_local
+
+# 현재 종방향 X만 확인됐다. Y/Z와 RPY를 정밀 측정한 뒤 enabled와
+# calibration_state를 바꾼다. 미측정 축의 0은 자리표시자다.
+static_transforms:
+  - parent_frame: base_link
+    child_frame: imu_link
+    translation_m: [0.25, 0.0, 0.0]
+    rotation_rpy_deg: [0.0, 0.0, 0.0]
+    enabled: false
+    calibration_state: unmeasured
+    measured_at: ""
+    source: user_report_2026-08-30_longitudinal_only
+  - parent_frame: base_link
+    child_frame: gps_link
+    translation_m: [0.0, 0.0, 0.0]
+    rotation_rpy_deg: [0.0, 0.0, 0.0]
+    enabled: false
+    calibration_state: unmeasured
+    measured_at: ""
+    source: ""
+  - parent_frame: base_link
+    child_frame: laser_link
+    translation_m: [1.05, 0.0, 0.0]
+    rotation_rpy_deg: [0.0, 0.0, 0.0]
+    enabled: false
+    calibration_state: unmeasured
+    measured_at: ""
+    source: user_report_2026-08-30_longitudinal_only

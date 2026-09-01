@@ -1,0 +1,8 @@
+# 예제 구조다. 파일명을 map.yaml로 바꾸기 전에 모든 값을 실제 지도에 맞춘다.
+image: map.pgm
+resolution: 0.05
+origin: [0.0, 0.0, 0.0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+mode: trinary

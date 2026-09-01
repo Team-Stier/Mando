@@ -1,0 +1,34 @@
+# KumarRobotics/ublox ROS1 드라이버용 ZED-F9P UART1 설정이다.
+device: /dev/mando_gps
+frame_id: gps_link
+uart1:
+  baudrate: 460800
+  in: 1       # UBX
+  out: 1      # UBX
+
+# 현재 UART1은 NMEA 문장을 출력하고 있으므로 드라이버가 시작할 때 UART1을
+# UBX(1)로 전환해야 NavPVT와 NavSatFix 계약을 만족한다. save_on_shutdown=false라
+# 수신기 Flash에는 저장하지 않는다.
+config_on_startup: true
+save_on_shutdown: false
+clear_bbr: false
+rate: 10.0
+nav_rate: 1
+dynamic_model: automotive
+fix_mode: both
+enable_ppp: false
+debug: 0
+
+publish:
+  all: false
+  nav:
+    pvt: true
+    posecef: false
+    posllh: false
+    relposned: false
+
+hardware:
+  usb_serial: DBT042C1
+  receiver: ZED-F9P
+  interface: C099_UART1
+  rtk_correction_source: none

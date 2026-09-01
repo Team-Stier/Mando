@@ -1,0 +1,28 @@
+<launch>
+  <!-- 실제 지도 파일과 particle filter 수렴에 의존하지 않는 LiDAR 경계 계약 테스트다. -->
+  <node pkg="mando_localization" type="localization_interface_adapter_node"
+        name="localization_interface_adapter_rostest" output="screen" required="true">
+    <rosparam command="load"
+              file="$(find mando_localization)/config/localization_interfaces.yaml"/>
+  </node>
+
+  <node pkg="mando_localization" type="odometry_lidar_fusion_node"
+        name="odometry_lidar_fusion_rostest" output="screen" required="true">
+    <rosparam command="load"
+              file="$(find mando_localization)/config/localization_interfaces.yaml"/>
+    <rosparam command="load"
+              file="$(find mando_localization)/config/lidar_localization.yaml"/>
+    <rosparam command="load"
+              file="$(find mando_localization)/config/gps_reference.yaml"/>
+    <rosparam command="load"
+              file="$(find mando_localization)/config/status_policy.yaml"/>
+
+    <!-- 합성 map 좌표와 GPS pose가 같은 frame이라는 테스트 전제다. -->
+    <param name="reference/measured" value="true"/>
+  </node>
+
+  <test test-name="synthetic_occupancygrid_lidar_contract"
+        pkg="mando_localization"
+        type="test_synthetic_lidar_localization.py"
+        time-limit="30.0"/>
+</launch>

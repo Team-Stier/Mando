@@ -1,0 +1,26 @@
+<launch>
+  <arg name="interfaces_config" default="$(find mando_localization)/config/localization_interfaces.yaml"/>
+  <arg name="visualization_config" default="$(find mando_localization)/config/visualization.yaml"/>
+  <arg name="rviz_config" default="$(find mando_localization)/rviz/mando_localization.rviz"/>
+  <arg name="start_visualization" default="true"/>
+  <arg name="start_rviz" default="true"/>
+  <arg name="visualization_node_name" default="localization_visualization"/>
+  <arg name="rviz_node_name" default="mando_localization_rviz"/>
+
+  <!-- RViz 패널은 이 전역 인터페이스 경로에서 상태 토픽을 읽는다. -->
+  <rosparam command="load" file="$(arg interfaces_config)" ns="/mando_localization/interfaces"/>
+  <rosparam command="load" file="$(arg visualization_config)" ns="/mando_localization/visualization"/>
+
+  <group if="$(arg start_visualization)">
+    <node pkg="mando_localization" type="localization_visualization_node"
+          name="$(arg visualization_node_name)" output="screen" clear_params="true">
+      <rosparam command="load" file="$(arg interfaces_config)"/>
+      <rosparam command="load" file="$(arg visualization_config)"/>
+    </node>
+  </group>
+
+  <group if="$(arg start_rviz)">
+    <node pkg="rviz" type="rviz" name="$(arg rviz_node_name)"
+          args="-d $(arg rviz_config)" output="screen" required="false"/>
+  </group>
+</launch>
