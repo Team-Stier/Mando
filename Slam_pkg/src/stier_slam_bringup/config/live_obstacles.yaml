@@ -1,9 +1,0 @@
-map_frame: map
-ttl_sec: 0.75
-occupied_threshold: 65
-local_grid_width: 160
-local_grid_height: 160
-local_grid_resolution: 0.10
-max_input_points: 5000
-max_tracked_cells: 4000
-publish_rate_hz: 10.0
