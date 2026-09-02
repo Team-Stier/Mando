@@ -3,6 +3,7 @@
 schema_version: 1
 
 nodes:
+  encoder_driver: mando_encoder_serial
   imu_driver: xsens_mti_node
   gps_driver: ublox_gps_node
   interface_adapter: localization_interface_adapter
