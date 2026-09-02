@@ -38,6 +38,53 @@ class ConfigurationContractTest(unittest.TestCase):
             ],
             fields,
         )
+        drive_path = PACKAGE.parent / "erp42_msgs" / "msg" / "DriveCmd.msg"
+        drive_fields = [
+            line.split("#", 1)[0].strip()
+            for line in drive_path.read_text(encoding="utf-8").splitlines()
+            if line.split("#", 1)[0].strip()
+        ]
+        self.assertEqual(["uint16 KPH", "int16 Deg", "uint8 brake"], drive_fields)
+
+    def test_encoder_rosserial_driver_is_wired_to_the_connected_uno(self):
+        driver = load_yaml("encoder_driver.yaml")
+        self.assertEqual(
+            "/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_"
+            "11254501101131313365-if00",
+            driver["port"],
+        )
+        self.assertEqual(57600, driver["baud"])
+        self.assertEqual("11254501101131313365", driver["hardware"]["usb_serial"])
+        self.assertEqual("2341:0043", driver["hardware"]["usb_vid_pid"])
+
+        sensors = ET.parse(PACKAGE / "launch" / "sensors.launch").getroot()
+        arguments = {
+            item.attrib["name"]: item.attrib.get("default")
+            for item in sensors.findall("arg")
+        }
+        self.assertEqual("true", arguments["start_encoder_driver"])
+        encoder_node = sensors.find(".//node[@pkg='rosserial_python']")
+        self.assertIsNotNone(encoder_node)
+        self.assertEqual("serial_node.py", encoder_node.attrib["type"])
+        self.assertEqual(
+            "$(arg encoder_driver_node_name)", encoder_node.attrib["name"]
+        )
+        self.assertEqual(
+            "$(arg encoder_driver_config)",
+            encoder_node.find("rosparam").attrib["file"],
+        )
+
+        bringup = (PACKAGE / "launch" / "bringup.launch").read_text(encoding="utf-8")
+        self.assertIn('name="start_encoder_driver" default="true"', bringup)
+        self.assertIn(
+            'name="encoder_driver_config" value="$(arg encoder_driver_config)"',
+            bringup,
+        )
+        dependencies = {
+            element.text
+            for element in ET.parse(PACKAGE / "package.xml").getroot().findall("exec_depend")
+        }
+        self.assertIn("rosserial_python", dependencies)
 
     def test_public_interfaces_and_units(self):
         config = load_yaml("localization_interfaces.yaml")
@@ -45,6 +92,7 @@ class ConfigurationContractTest(unittest.TestCase):
         self.assertEqual("/molit/localization/odometry", config["topics"]["output_odometry"])
         self.assertEqual("map", config["frames"]["map"])
         self.assertEqual("base_link", config["frames"]["base_link"])
+        self.assertEqual("mando_encoder_serial", config["nodes"]["encoder_driver"])
         self.assertEqual("/erp42_serial/feedback", config["topics"]["encoder_state"])
         self.assertEqual("erp42_msgs/SerialFeedBack", config["message_types"]["encoder_state"])
         self.assertEqual("m/s", config["contracts"]["speed_unit"])

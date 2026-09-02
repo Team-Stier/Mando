@@ -3,6 +3,7 @@
   <arg name="interfaces_config" default="$(find mando_localization)/config/localization_interfaces.yaml"/>
   <arg name="imu_driver_config" default="$(find mando_localization)/config/imu_driver.yaml"/>
   <arg name="gps_driver_config" default="$(find mando_localization)/config/gps_driver.yaml"/>
+  <arg name="encoder_driver_config" default="$(find mando_localization)/config/encoder_driver.yaml"/>
   <arg name="encoder_config" default="$(find mando_localization)/config/encoder_calibration.yaml"/>
   <arg name="tf_config" default="$(find mando_localization)/config/tf_configuration.yaml"/>
   <arg name="local_ekf_config" default="$(find mando_localization)/config/ekf_local.yaml"/>
@@ -16,6 +17,7 @@
   <arg name="map_file" default="$(find mando_localization)/maps/map.yaml"/>
 
   <!-- 기능 활성화. LiDAR 지도 정합은 지도와 실측 TF가 준비되기 전까지 false다. -->
+  <arg name="start_encoder_driver" default="true"/>
   <arg name="start_imu_driver" default="false"/>
   <arg name="start_gps_driver" default="false"/>
   <arg name="motion_source" default="encoder"/>
@@ -34,6 +36,7 @@
   <arg name="start_rviz" default="true"/>
 
   <!-- 실제 ROS node name은 launch argument로 변경한다. -->
+  <arg name="encoder_driver_node_name" default="mando_encoder_serial"/>
   <arg name="imu_driver_node_name" default="xsens_mti_node"/>
   <arg name="gps_driver_node_name" default="ublox_gps_node"/>
   <arg name="imu_normalizer_node_name" default="imu_normalizer"/>
@@ -56,10 +59,13 @@
   <rosparam command="load" file="$(arg visualization_config)" ns="/mando_localization/visualization"/>
 
   <include file="$(find mando_localization)/launch/sensors.launch">
+    <arg name="start_encoder_driver" value="$(arg start_encoder_driver)"/>
     <arg name="start_imu_driver" value="$(arg start_imu_driver)"/>
     <arg name="start_gps_driver" value="$(arg start_gps_driver)"/>
+    <arg name="encoder_driver_node_name" value="$(arg encoder_driver_node_name)"/>
     <arg name="imu_driver_node_name" value="$(arg imu_driver_node_name)"/>
     <arg name="gps_driver_node_name" value="$(arg gps_driver_node_name)"/>
+    <arg name="encoder_driver_config" value="$(arg encoder_driver_config)"/>
     <arg name="imu_driver_config" value="$(arg imu_driver_config)"/>
     <arg name="gps_driver_config" value="$(arg gps_driver_config)"/>
   </include>

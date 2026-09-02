@@ -16,6 +16,7 @@
 
 | 키 | 기본값 | 사용처 |
 |---|---|---|
+| `nodes.encoder_driver` | `mando_encoder_serial` | Arduino rosserial transport; launch에서 덮어씀 |
 | `nodes.imu_driver` | `xsens_mti_node` | 장치/driver diagnostics; launch에서 덮어씀 |
 | `nodes.gps_driver` | `ublox_gps_node` | 장치/driver diagnostics; launch에서 덮어씀 |
 | `nodes.interface_adapter` | `localization_interface_adapter` | 공개↔내부 relay |
@@ -216,6 +217,28 @@ override는 Xsens 드라이버가 아니라 `ImuNormalizer`가 정규화 출력�
 | `hardware.rtk_correction_source` | string | `none` | NTRIP/RTCM 범위 밖 |
 
 이 파일은 외부 `ublox_gps` 패키지용입니다. 2026-08-30 `/dev/ttyUSB1` 460800 baud에서 확인한 실제 출력은 NMEA `GNRMC/GNGGA`이고 상태는 `V/0` no-fix였습니다. 드라이버가 시작하면 UART1의 휘발성 설정을 UBX in/out으로 바꾸되 `save_on_shutdown=false`라 Flash에는 저장하지 않습니다. 현재 호스트에는 `ublox_gps`가 없어 실제 UBX 전환과 ROS `NavSatFix`/`NavPVT` rate·frame·timestamp·covariance는 미검증입니다.
+
+## `encoder_driver.yaml`
+
+| 키 | 타입·기본값 | 영향 |
+|---|---|---|
+| `port` | string, `/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_11254501101131313365-if00` | 현재 Uno serial에 고정된 안정 경로; `/dev/ttyACM*` 번호를 사용하지 않음 |
+| `baud` | int, `57600` | 펌웨어 rosserial baud |
+| `hardware.model` | `Arduino Uno` | 연결 대상 기록 |
+| `hardware.usb_vid_pid` | `2341:0043` | USB identity 기록 |
+| `hardware.usb_serial` | `11254501101131313365` | 현재 실장치 serial |
+| `hardware.transport` | `rosserial` | transport 기록 |
+| `hardware.calibration_state` | `connected_unverified` | transport 연결은 확인됐지만 바퀴 pulse·부호·scale은 미검증 |
+
+`bringup.launch`는 기본 `start_encoder_driver:=true`로
+`rosserial_python/serial_node.py`를 시작합니다. 다른 프로세스가 같은 USB 포트를
+소유하면 반드시 false로 바꿉니다. 펌웨어가 feedback publisher와 drive subscriber를
+같이 선언하므로 이 노드가 올라오면 `/erp42_serial/drive` 수신 경로도 협상됩니다.
+Localization은 drive 명령을 발행하지 않으며 Controller 책임은 별도로 유지합니다.
+
+2026-09-02 정지 상태 확인에서는 raw feedback과 변환 Twist가 약 9.51 Hz였고
+`alive`가 증가했습니다. 이는 USB·rosserial·토픽 연결 증거이지 D2/D3 pulse,
+전진 방향과 거리·속도 보정 증거가 아닙니다.
 
 ## `encoder_calibration.yaml`
 

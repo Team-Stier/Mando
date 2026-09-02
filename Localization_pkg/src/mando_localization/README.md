@@ -53,7 +53,10 @@ EKF를 직접 우회하지 않습니다.
 
 ### Arduino 엔코더 연결 계약
 
-Arduino가 발행하는 `/erp42_serial/feedback`을 localization이 직접 구독합니다.
+`rosserial_python/serial_node.py`가 Arduino USB와 연결해 펌웨어의
+`/erp42_serial/feedback`을 ROS에 노출하고 localization이 이를 직접 구독합니다.
+현재 포트와 baud는 [`config/encoder_driver.yaml`](config/encoder_driver.yaml)에
+serial 기반 `/dev/serial/by-id/...` 경로와 `57600`으로 고정돼 있습니다.
 `SerialFeedBack`에는 ROS `Header`가 없으므로 `EncoderToTwistAdapter`가 받은 PC 시각을 출력 timestamp로 사용합니다.
 
 | 입력 필드 | 타입 | localization 사용 방식 |
@@ -67,6 +70,11 @@ Arduino가 발행하는 `/erp42_serial/feedback`을 localization이 직접 구�
 
 통과한 입력은 `/molit/vehicle/twist`의 `TwistWithCovarianceStamped`로 변환됩니다. 현재 `linear.x`만 관측하며 `Var(vx)=0.25 (m/s)^2`입니다. 정확한 기본값은 [`config/encoder_calibration.yaml`](config/encoder_calibration.yaml)이 기준입니다.
 
+펌웨어는 같은 rosserial 연결에서 `/erp42_serial/drive` 구독도 선언합니다.
+`erp42_msgs/DriveCmd`는 깨끗한 rosserial type 협상을 위해 포함하지만 localization은
+이 토픽을 발행하지 않습니다. 별도 Controller나 외부 rosserial bridge가 이미 포트를
+소유한다면 `start_encoder_driver:=false`로 중복 연결을 막아야 합니다.
+
 드라이버, `robot_localization`, AMCL 내부 토픽은 충돌과 설정 중복을 막기 위해 `/mando_localization/internal/...`로 고정되어 있습니다. 어댑터는 GPS NavPVT, map과 initialpose도 relay하므로 공개 이름은 `config/localization_interfaces.yaml`에서 관리합니다. 다만 RViz display 토픽은 `.rviz` 파일에도 저장되므로 토픽을 바꿀 때 차량별 `rviz_config`도 함께 준비해야 합니다.
 
 ## 빌드와 기본 실행
@@ -79,7 +87,7 @@ source devel/setup.bash
 roslaunch mando_localization bringup.launch
 ```
 
-기본값은 `start_imu_driver:=false`, `start_gps_driver:=false`,
+기본값은 `start_encoder_driver:=true`, `start_imu_driver:=false`, `start_gps_driver:=false`,
 `enable_lidar_localization:=false`이며 GPS-only automatic reset도 비활성입니다.
 외부에서 공개 센서 토픽을 발행하지 않으면 상태는 유효해지지 않고 최종
 Odometry도 나오지 않습니다. Local drift가 누적된 장기 GPS 단절에서는 기본
@@ -91,10 +99,13 @@ Odometry도 나오지 않습니다. Local drift가 누적된 장기 GPS 단절�
 ```bash
 test -e /dev/imu && readlink -f /dev/imu
 test -e /dev/mando_gps && readlink -f /dev/mando_gps
+test -e /dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_11254501101131313365-if00
+rospack find rosserial_python
 rospack find xsens_mti_driver
 rospack find ublox_gps
 
 roslaunch mando_localization bringup.launch \
+  start_encoder_driver:=true \
   start_imu_driver:=true \
   start_gps_driver:=true
 ```
@@ -134,6 +145,23 @@ roslaunch mando_localization visualization.launch
 - IMU covariance override에는 2026-08-31 정지·모터 OFF bag의 noise floor가 `measured`로 입력돼 있지만 주행·진동·절대 yaw 오차까지 검증한 값은 아닙니다. GPS는 단독 GNSS 설정이며 NTRIP/RTCM 입력은 이 범위에 포함되지 않습니다.
 
 실측값 없이 기능을 강제로 켜면 노드가 실행되더라도 지도 기준 위치의 정확성을 보장할 수 없습니다.
+
+### 현재 Arduino 엔코더 연결 결과와 남은 차단 조건
+
+2026-09-02 확인에서 Arduino Uno는 `/dev/ttyACM0`, VID:PID `2341:0043`,
+serial `11254501101131313365`로 인식됐습니다. serial 기반 안정 경로를 57600 baud로
+연결했을 때 `/erp42_serial/feedback`과 변환된 `/molit/vehicle/twist`가 모두 약
+9.51 Hz로 수신됐고 `alive` 증가, `base_link` frame, `linear.x`와 covariance까지
+확인했습니다. 내부 `/mando_localization/internal/ekf/twist`도 같은 주기로 relay되고
+Local/Global EKF가 이를 구독하는 graph까지 확인했습니다. 원본 메시지 MD5는
+`977be1b73fb4d99913310d68e9241255`입니다.
+
+확인 당시 차량은 정지 상태여서 `speed=0`, `encoder=0`이었습니다. 따라서 이 결과는
+USB·rosserial·ROS 토픽·변환 연결 증거이며, D2/D3 pulse 배선, 전진 부호,
+counts/rev와 실제 속도 scale의 증거는 아닙니다. 모터 전원을 차단하고 바퀴를 띄운
+회전 시험 전에는 `direction_sign`, `meter_per_tick`과 속도 보정값을 바꾸지 않습니다.
+IMU와 절대 위치 센서를 끈 연결 시험이므로 최종 localization 정확도·유효성 검증도
+아닙니다.
 
 ### 현재 Xsens 확인 결과와 남은 차단 조건
 

@@ -1,0 +1,11 @@
+# 현재 BROON T870 Arduino Uno의 rosserial 연결 설정이다.
+# ttyACM 번호 대신 USB serial 기반 by-id 경로를 사용한다.
+port: /dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_11254501101131313365-if00
+baud: 57600
+
+hardware:
+  model: Arduino Uno
+  usb_vid_pid: "2341:0043"
+  usb_serial: "11254501101131313365"
+  transport: rosserial
+  calibration_state: connected_unverified

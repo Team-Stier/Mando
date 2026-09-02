@@ -34,7 +34,7 @@ map -- Global EKF --> odom -- Local EKF --> base_link
 | map_server → 공개 지도 | `/mando_localization/internal/amcl/map` | `/map` |
 | RViz 수동 초기값 → AMCL | `/mando_localization/internal/amcl/initialpose` | `/initialpose` |
 
-드라이버를 launch에서 시작하지 않으면 외부 드라이버가 공개 IMU/GPS 토픽을 직접 발행할 수 있습니다. 인터페이스 어댑터가 자기 구독하지 않도록 드라이버를 시작할 때만 고정 driver 토픽을 사용합니다. NavPVT는 `topic_tools/ShapeShifter`로 실제 드라이버 메시지 타입을 바꾸지 않고 relay합니다. EKF·AMCL 내부 토픽과 output remap은 설정 중복을 막기 위한 패키지 계약이므로 차량별 YAML로 변경하지 않습니다.
+드라이버를 launch에서 시작하지 않으면 외부 드라이버가 공개 센서 토픽을 직접 발행할 수 있습니다. Arduino는 기본적으로 serial 기반 by-id 경로와 57600 baud로 rosserial bridge를 시작하며, 외부 bridge가 포트를 소유할 때는 `start_encoder_driver:=false`로 둡니다. 인터페이스 어댑터가 자기 구독하지 않도록 IMU/GPS 드라이버를 시작할 때만 고정 driver 토픽을 사용합니다. NavPVT는 `topic_tools/ShapeShifter`로 실제 드라이버 메시지 타입을 바꾸지 않고 relay합니다. EKF·AMCL 내부 토픽과 output remap은 설정 중복을 막기 위한 패키지 계약이므로 차량별 YAML로 변경하지 않습니다.
 
 GPS gate는 Local innovation 전 quality candidate와 정상 gate pose를 각각
 `/mando_localization/internal/gps/candidate_pose`,
@@ -46,7 +46,7 @@ Coordinator만 `/molit/localization/gps/map_pose`를 발행하며, 인터페이�
 
 ### 1. IMU·엔코더와 Local EKF
 
-1. Xsens raw IMU는 공개 토픽으로 relay됩니다.
+1. Arduino Uno는 `rosserial_python`을 통해 `/erp42_serial/feedback`을 약 10 Hz로 발행하고, Xsens raw IMU는 공개 토픽으로 relay됩니다.
 2. `ImuNormalizer`가 timestamp, frame, quaternion, covariance와 finite 값을 검사해 정규화 IMU를 발행합니다. covariance override가 비활성이면 raw 세 covariance 배열의 양수 대각을 요구합니다. 현재는 `measured` override가 활성화되어 정지 bag에서 측정해 설정한 표준편차의 제곱으로 출력 covariance를 교체합니다. Override는 비어 있지 않은 측정 시각·출처와 세 축의 양수 표준편차가 모두 있어야 켤 수 있습니다.
 3. `EncoderToTwistAdapter`는 Arduino의 `/erp42_serial/feedback` (`erp42_msgs/SerialFeedBack`)을 직접 구독하고 직전 `alive` 값과 달라졌는지, `speed`·`steer`의 finite 여부, `|speed| <= 30 m/s`, `|encoder| <= 100000`, `steer` ADC 0–65535 범위를 검사합니다. 이 메시지에는 Header가 없으므로 PC 수신 시각과 `base_link`를 출력 Twist header에 명시합니다.
 4. `speed * speed_scale * direction_sign`만 `Twist.linear.x`로 사용합니다.
@@ -172,6 +172,12 @@ GPS/LiDAR marker는 마지막 수신 pose를 유지하므로 센서가 끊겨도
 ## 운영 전 준비 상태
 
 현재 저장소에는 실지도 `maps/map.yaml`이 없고, 센서 정적 TF 세 개는 모두 비활성·미측정입니다. GPS datum도 `first_fix`, 엔코더 거리·조향 보정은 미측정 상태입니다. IMU covariance는 정지·모터 OFF noise floor만 `measured`이고 주행 조건에서는 미검증입니다. 이 기본값은 아키텍처 시험용이지 실차 정밀 위치의 실측 증거가 아닙니다.
+
+Arduino Uno는 2026-09-02 실측에서 VID:PID `2341:0043`, serial
+`11254501101131313365`로 확인됐습니다. by-id 경로의 57600 baud rosserial 연결에서
+`/erp42_serial/feedback`과 `/molit/vehicle/twist`가 모두 약 9.51 Hz였고 내부 EKF
+Twist 토픽까지 relay됐습니다. 다만 정지 샘플만 관찰했으므로 엔코더 pulse, 전진
+부호와 속도 scale은 아직 실차 검증 전입니다.
 
 Xsens는 2026-08-30 실측에서 `/dev/ttyUSB0`, serial `DB8GG04M`, device ID `03889250` (`MTi-3-8A7G6`), 115200 baud로 auto-scan됐고 IMU 약 100.95 Hz, `imu_link`, timestamp 존재까지 확인했습니다. 원본 세 covariance 배열은 모두 0이지만 2026-08-31 정지·모터 OFF bag으로 측정한 표준편차 override가 활성화돼 정규화 출력에는 양의 covariance가 들어갑니다. 다만 정지 noise floor이므로 주행·모터 진동·자기장 교란과 절대 yaw 정확도를 보증하지 않습니다.
 

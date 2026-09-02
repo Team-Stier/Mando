@@ -57,6 +57,7 @@
   <exec_depend>roscpp</exec_depend>
   <exec_depend>roslib</exec_depend>
   <exec_depend>rosserial_arduino</exec_depend>
+  <exec_depend>rosserial_python</exec_depend>
   <exec_depend>rviz</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
