@@ -326,7 +326,7 @@ void updateRosCommand(uint32_t nowMs) {
   rosCommand = rosBridge.vehicleCommand(
       nowMs,                                             // 현재 시각(ms)
       BroonT870Controller::kRosTimeoutMs,               // ROS 명령 유효 시간 — 이보다 오래됐으면 무시
-      BroonT870Controller::kRosMaximumAbsKph,           // ROS가 요청할 수 있는 최대 속도(km/h)
+      BroonT870Controller::kRosMaximumForwardKph,       // ROS 전진 최대 속도(km/h)
       BroonT870Controller::kRosMinimumDegrees,          // ROS 조향 최소 각도
       BroonT870Controller::kRosMaximumDegrees,          // ROS 조향 최대 각도
       BroonT870Controller::kSteeringCalibration.leftSafeAdc,  // 왼쪽 안전 ADC값
@@ -538,8 +538,14 @@ void updateDrive(uint32_t nowMs) {
   if (!controlTickDue) {
     return; // 제어 주기가 아니면 아무것도 안 함
   }
-  const int16_t requestedDrivePwm =
+  int16_t requestedDrivePwm =
       selectedMode == MODE_ROS ? rosSpeedControlPwm : activeCommand.drivePwm;
+  if ((requestedDrivePwm > 0 &&
+       measuredAbsoluteKph >= BroonT870Controller::kDriveForwardSpeedLimitKph) ||
+      (requestedDrivePwm < 0 &&
+       measuredAbsoluteKph >= BroonT870Controller::kDriveReverseSpeedLimitKph)) {
+    requestedDrivePwm = 0;
+  }
   latestDriveRequestedPwm = requestedDrivePwm;
   const DrivePairResult pair = BroonT870::updateDrivePair(
       drivePairState,                                   // 앞/뒤 구동 내부 상태
