@@ -371,8 +371,8 @@ void updateInputCommands(uint32_t nowMs, uint32_t nowUs) {
         BroonT870Controller::kRcThrottleCalibration.centerUs,  // 스로틀 중립값(μs)
         BroonT870Controller::kRcThrottleCalibration.maximumUs, // 스로틀 최댓값(μs)
         BroonT870Controller::kRcThrottleDeadbandUs,            // 중립 주변 데드밴드(μs)
-        BroonT870Controller::kDriveForwardMaxPwm,              // 전진 최대 PWM
-        BroonT870Controller::kDriveReverseMaxPwm);             // 후진 최대 PWM → 부호 있는 PWM값 반환
+        BroonT870Controller::kRcDriveForwardMaxPwm,            // RC 전진 최대 PWM
+        BroonT870Controller::kRcDriveReverseMaxPwm);           // RC 후진 최대 PWM → 부호 있는 PWM값 반환
     rcCommand.steerTargetAdc = BroonT870::rcSteerToTargetAdc(
         snapshot.steerPulseUs,                                 // RC 조향 신호 펄스폭(μs)
         BroonT870Controller::kRcSteerCalibration.minimumUs,    // 조향 채널 최솟값(μs)
@@ -540,10 +540,11 @@ void updateDrive(uint32_t nowMs) {
   }
   int16_t requestedDrivePwm =
       selectedMode == MODE_ROS ? rosSpeedControlPwm : activeCommand.drivePwm;
-  if ((requestedDrivePwm > 0 &&
+  if (selectedMode == MODE_ROS &&
+      ((requestedDrivePwm > 0 &&
        measuredAbsoluteKph >= BroonT870Controller::kDriveForwardSpeedLimitKph) ||
       (requestedDrivePwm < 0 &&
-       measuredAbsoluteKph >= BroonT870Controller::kDriveReverseSpeedLimitKph)) {
+       measuredAbsoluteKph >= BroonT870Controller::kDriveReverseSpeedLimitKph))) {
     requestedDrivePwm = 0;
   }
   latestDriveRequestedPwm = requestedDrivePwm;

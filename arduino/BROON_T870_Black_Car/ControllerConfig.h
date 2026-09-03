@@ -110,6 +110,8 @@ constexpr uint16_t kSteeringEndpointTargetBandAdc = 25U;
 // repeatedly pulsing the steering motor. Resume only after a clear departure.
 constexpr uint16_t kSteeringEndpointSettleErrorAdc = 30U;
 constexpr uint16_t kSteeringEndpointRestartErrorAdc = 80U;
+constexpr uint8_t kRcDriveForwardMaxPwm = 230U;
+constexpr uint8_t kRcDriveReverseMaxPwm = 100U;
 constexpr uint8_t kDriveForwardMaxPwm = 230U;
 constexpr uint8_t kDriveReverseMaxPwm = 230U;
 constexpr uint8_t kDriveAccelerationRampStep = 10U;
