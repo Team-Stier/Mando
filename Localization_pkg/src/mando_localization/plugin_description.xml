@@ -1,7 +1,0 @@
-<library path="lib/libmando_localization_rviz_plugins">
-  <class name="mando_localization/LocalizationStatusPanel"
-         type="mando_localization::LocalizationStatusPanel"
-         base_class_type="rviz::Panel">
-    <description>LocalizationStatusManager 진단을 한국어로 표시하는 RViz 패널.</description>
-  </class>
-</library>

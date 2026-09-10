@@ -54,6 +54,13 @@ OdometryGpsFusion::OdometryGpsFusion(const ros::NodeHandle& node,
       &OdometryGpsFusion::local_odometry_callback, this);
   reanchor_subscriber_ = node_.subscribe(
       reanchor_topic_, 5, &OdometryGpsFusion::reanchor_callback, this);
+  if (require_clock_ready_) {
+    clock_ready_subscriber_ = node_.subscribe(
+        requireParameter<std::string>(private_node_, "internal_topics/clock_ready"),
+        1, &OdometryGpsFusion::clock_ready_callback, this);
+  }
+  pending_timer_ = node_.createWallTimer(ros::WallDuration(0.01),
+      &OdometryGpsFusion::pending_timer_callback, this);
   publish_relocalizing(false);
   ROS_INFO_STREAM("OdometryGpsFusion 설정: " << gps_topic_ << " -> "
                   << pose_topic_ << ", datum_mode=" << reference_mode_
@@ -90,6 +97,22 @@ void OdometryGpsFusion::load_configuration() {
       requireParameter<bool>(private_node_, "reference/measured");
   yaw_offset_rad_ =
       requireParameter<double>(private_node_, "reference/yaw_offset_rad");
+  lever_arm_x_m_ = requireParameter<double>(private_node_, "lever_arm/x_m");
+  lever_arm_y_m_ = requireParameter<double>(private_node_, "lever_arm/y_m");
+  lever_arm_max_yaw_stamp_skew_sec_ = requireParameter<double>(
+      private_node_, "lever_arm/max_yaw_stamp_skew_sec");
+  private_node_.param("timing/local_history_duration_sec", local_history_duration_sec_, 2.0);
+  private_node_.param("timing/local_history_max_samples", local_history_max_samples_, 200);
+  private_node_.param("timing/pending_wait_sec", pending_wait_sec_, 0.10);
+  private_node_.param("timing/pending_max_samples", pending_max_samples_, 20);
+  private_node_.param("timing/require_clock_ready", require_clock_ready_, false);
+  private_node_.param("timing/clock_ready_timeout_sec", clock_ready_timeout_sec_, 3.0);
+  manual_datum_base_yaw_rad_ = requireParameter<double>(
+      private_node_, "lever_arm/manual_datum_base_yaw_rad");
+  lever_arm_calibration_state_ = requireParameter<std::string>(
+      private_node_, "lever_arm/calibration_state");
+  lever_arm_source_ =
+      requireParameter<std::string>(private_node_, "lever_arm/source");
 
   minimum_fix_status_ = requireParameter<int>(
       private_node_, "quality/minimum_fix_status");
@@ -146,6 +169,35 @@ void OdometryGpsFusion::load_configuration() {
   }
   if (!std::isfinite(yaw_offset_rad_)) {
     throw std::runtime_error("reference/yaw_offset_rad must be finite");
+  }
+  if (!std::isfinite(lever_arm_x_m_) || !std::isfinite(lever_arm_y_m_) ||
+      !std::isfinite(manual_datum_base_yaw_rad_)) {
+    throw std::runtime_error("lever_arm planar values must be finite");
+  }
+  requireFinitePositive(lever_arm_max_yaw_stamp_skew_sec_,
+                           "lever_arm/max_yaw_stamp_skew_sec");
+  requireFinitePositive(local_history_duration_sec_, "timing/local_history_duration_sec");
+  requireFinitePositive(pending_wait_sec_, "timing/pending_wait_sec");
+  requireFinitePositive(clock_ready_timeout_sec_, "timing/clock_ready_timeout_sec");
+  if (local_history_max_samples_ < 2 || pending_max_samples_ < 1 ||
+      local_history_duration_sec_ < max_message_age_sec_ ||
+      lever_arm_max_yaw_stamp_skew_sec_ > local_history_duration_sec_ ||
+      pending_wait_sec_ > max_message_age_sec_) {
+    throw std::runtime_error("Invalid GPS timing history/pending bounds");
+  }
+  local_history_.configure(local_history_duration_sec_, lever_arm_max_yaw_stamp_skew_sec_,
+                           static_cast<std::size_t>(local_history_max_samples_),
+                           odom_frame_, base_link_frame_);
+  if (lever_arm_calibration_state_ != "unmeasured" &&
+      lever_arm_calibration_state_ != "provisional" &&
+      lever_arm_calibration_state_ != "measured" &&
+      lever_arm_calibration_state_ != "verified") {
+    throw std::runtime_error("lever_arm/calibration_state is invalid");
+  }
+  if (lever_arm_calibration_state_ == "unmeasured" ||
+      lever_arm_source_.empty()) {
+    throw std::runtime_error(
+        "lever_arm requires calibrated state and source");
   }
   if (minimum_fix_status_ < sensor_msgs::NavSatStatus::STATUS_FIX ||
       minimum_fix_status_ > sensor_msgs::NavSatStatus::STATUS_GBAS_FIX) {
@@ -222,51 +274,136 @@ void OdometryGpsFusion::load_configuration() {
       throw std::runtime_error("manual datum values must be finite WGS84 data");
     }
     datum_.ready = true;
+    reference_lever_arm_map_ =
+        lever_arm_in_map(manual_datum_base_yaw_rad_);
+    reference_lever_arm_ready_ = true;
+  }
+}
+
+void OdometryGpsFusion::observe_clock(const ros::Time& now) {
+  if (!last_observed_clock_.isZero() && now < last_observed_clock_) {
+    reset_time_epoch();
+  }
+  last_observed_clock_ = now;
+}
+
+void OdometryGpsFusion::reset_time_epoch() {
+  local_history_.clear();
+  pending_fixes_.clear();
+  candidate_history_.clear();
+  have_local_odometry_ = false;
+  local_odometry_receipt_time_ = ros::Time();
+  have_prediction_anchor_ = false;
+  have_latest_quality_candidate_ = false;
+  have_last_candidate_point_ = false;
+  have_last_stamp_ = false;
+  last_stamp_ = ros::Time();
+  last_received_gps_stamp_ = ros::Time();
+  clock_ready_ = false;
+  clock_ready_receipt_ = ros::SteadyTime();
+  recovery_gate_ = ConsecutiveRecoveryGate(recovery_gate_.requiredCount());
+  if (reference_mode_ == "first_fix") {
+    datum_ = Datum();
+    reference_lever_arm_ready_ = false;
+  }
+  publish_relocalizing(false);
+  ROS_WARN("GPS timing epoch reset: discarded history, pending fixes and anchors");
+}
+
+bool OdometryGpsFusion::clock_ready_is_fresh() const {
+  if (!require_clock_ready_) return true;
+  if (!clock_ready_ || clock_ready_receipt_.isZero()) return false;
+  const double age = (ros::SteadyTime::now() - clock_ready_receipt_).toSec();
+  return age >= 0.0 && age <= clock_ready_timeout_sec_;
+}
+
+void OdometryGpsFusion::clock_ready_callback(const std_msgs::Bool::ConstPtr& message) {
+  observe_clock(ros::Time::now());
+  clock_ready_ = message->data;
+  clock_ready_receipt_ = ros::SteadyTime::now();
+  if (!clock_ready_) {
+    pending_fixes_.clear();
+    recovery_gate_.markUnhealthy();
+    publish_relocalizing(recovery_gate_.recovering());
+  }
+}
+
+void OdometryGpsFusion::pending_timer_callback(const ros::WallTimerEvent&) {
+  observe_clock(ros::Time::now());
+  process_pending();
+}
+
+void OdometryGpsFusion::process_pending() {
+  if (!clock_ready_is_fresh()) {
+    pending_fixes_.clear();
+    recovery_gate_.markUnhealthy();
+    publish_relocalizing(recovery_gate_.recovering());
+    return;
+  }
+  while (!pending_fixes_.empty()) {
+    const PendingFix pending = pending_fixes_.front();
+    const ros::Time now = ros::Time::now();
+    std::string reason;
+    // An expired or reordered sample cannot reset a healthy measurement anchor.
+    if (!MessageValidation::validateStamp(pending.message->header.stamp, now,
+            max_message_age_sec_, max_future_stamp_sec_, have_last_stamp_, last_stamp_, &reason)) {
+      ROS_WARN_THROTTLE(1.0, "Discarding queued GPS fix: %s", reason.c_str());
+      pending_fixes_.pop_front();
+      continue;
+    }
+    nav_msgs::Odometry aligned;
+    const bool local_fresh = local_odometry_is_fresh(now, &reason);
+    const bool supported = local_fresh &&
+        local_history_.sample(pending.message->header.stamp, &aligned, &reason);
+    const double waited = (ros::SteadyTime::now() - pending.receipt).toSec();
+    if (supported && waited <= pending_wait_sec_) {
+      pending_fixes_.pop_front();
+      process_fix(pending.message, aligned);
+      continue;
+    }
+    const bool can_wait = !local_fresh || reason == "local_history_empty" ||
+                         reason == "awaiting_local_odometry";
+    if (can_wait && waited <= pending_wait_sec_) return;
+    ROS_WARN_THROTTLE(1.0, "Discarding unsupported GPS fix: %s (wait %.3f s)",
+                      reason.c_str(), waited);
+    pending_fixes_.pop_front();
   }
 }
 
 void OdometryGpsFusion::local_odometry_callback(
     const nav_msgs::Odometry::ConstPtr& message) {
-  const bool valid = !message->header.stamp.isZero() &&
-                     message->header.frame_id == odom_frame_ &&
-                     message->child_frame_id == base_link_frame_ &&
-                     std::isfinite(message->pose.pose.position.x) &&
-                     std::isfinite(message->pose.pose.position.y);
-  if (!valid) {
-    ROS_WARN_THROTTLE(1.0, "Rejecting local odometry used by GPS gate");
+  const ros::Time now = ros::Time::now();
+  observe_clock(now);
+  std::string reason;
+  if (!MessageValidation::validateStamp(message->header.stamp, now,
+          local_history_duration_sec_, max_future_stamp_sec_, false, ros::Time(), &reason) ||
+      !local_history_.append(*message, &reason)) {
+    ROS_WARN_THROTTLE(1.0, "Rejecting local odometry used by GPS history: %s", reason.c_str());
     return;
   }
-  std::string covariance_reason;
-  if (!MessageValidation::validateCovariance(
-          message->pose.covariance.data(), 6, false,
-          std::numeric_limits<double>::max(), &covariance_reason)) {
-    ROS_WARN_THROTTLE(1.0, "Rejecting invalid local odometry covariance: %s",
-                      covariance_reason.c_str());
-    return;
-  }
-  local_odometry_ = *message;
-  local_odometry_receipt_time_ = ros::Time::now();
+  local_history_.sample(message->header.stamp, &local_odometry_, &reason);
+  local_odometry_receipt_time_ = now;
   have_local_odometry_ = true;
+  process_pending();
 }
 
 void OdometryGpsFusion::reanchor_callback(
     const mando_localization::GpsGateReanchor::ConstPtr& message) {
+  observe_clock(ros::Time::now());
   const geometry_msgs::PoseWithCovarianceStamped& pose = message->pose;
+  const auto matching = std::find_if(candidate_history_.begin(), candidate_history_.end(),
+      [&pose](const CandidateRecord& record) { return record.pose.header.stamp == pose.header.stamp; });
   std::string reason;
   std::string covariance_reason;
   const bool covariance_valid = MessageValidation::validateCovariance(
       pose.pose.covariance.data(), 6, false,
       std::numeric_limits<double>::max(), &covariance_reason);
-  const double candidate_distance = have_latest_quality_candidate_
+  const double candidate_distance = matching != candidate_history_.end()
       ? std::hypot(
             pose.pose.pose.position.x -
-                latest_quality_candidate_.pose.pose.position.x,
+                matching->pose.pose.pose.position.x,
             pose.pose.pose.position.y -
-                latest_quality_candidate_.pose.pose.position.y)
-      : std::numeric_limits<double>::infinity();
-  const double candidate_stamp_gap = have_latest_quality_candidate_
-      ? std::abs((pose.header.stamp -
-                  latest_quality_candidate_.header.stamp).toSec())
+                matching->pose.pose.pose.position.y)
       : std::numeric_limits<double>::infinity();
   if (message->transaction_id == 0U || pose.header.stamp.isZero() ||
       pose.header.frame_id != map_frame_ ||
@@ -275,9 +412,10 @@ void OdometryGpsFusion::reanchor_callback(
       !std::isfinite(pose.pose.pose.position.z) ||
       !MessageValidation::finiteQuaternion(pose.pose.pose.orientation) ||
       !covariance_valid ||
-      !have_latest_quality_candidate_ ||
+      !clock_ready_is_fresh() || matching == candidate_history_.end() ||
       candidate_distance > max_reanchor_candidate_distance_m_ ||
-      candidate_stamp_gap > gps_recovery_gap_sec_ ||
+      !MessageValidation::validateStamp(pose.header.stamp, ros::Time::now(),
+          max_message_age_sec_, max_future_stamp_sec_, false, ros::Time(), &reason) ||
       !local_odometry_is_fresh(ros::Time::now(), &reason)) {
     if (reason.empty() && !covariance_valid) {
       reason = covariance_reason;
@@ -290,11 +428,11 @@ void OdometryGpsFusion::reanchor_callback(
   prediction_anchor_map_.x_m = pose.pose.pose.position.x;
   prediction_anchor_map_.y_m = pose.pose.pose.position.y;
   prediction_anchor_map_.z_m = pose.pose.pose.position.z;
-  prediction_anchor_local_odometry_ = local_odometry_;
+  prediction_anchor_local_odometry_ = matching->local;
   have_prediction_anchor_ = true;
   last_candidate_point_ = prediction_anchor_map_;
   have_last_candidate_point_ = true;
-  last_stamp_ = pose.header.stamp;
+  if (!have_last_stamp_ || pose.header.stamp > last_stamp_) last_stamp_ = pose.header.stamp;
   have_last_stamp_ = true;
   recovery_gate_.forceAccept();
   publish_relocalizing(false);
@@ -324,15 +462,16 @@ bool OdometryGpsFusion::local_odometry_is_fresh(
 
 bool OdometryGpsFusion::innovation_is_acceptable(
     const geometry_msgs::PoseWithCovarianceStamped& candidate,
+    const nav_msgs::Odometry& aligned_local,
     std::string* reason) const {
   if (!have_prediction_anchor_) {
     reason->clear();
     return true;
   }
 
-  const double local_dx = local_odometry_.pose.pose.position.x -
+  const double local_dx = aligned_local.pose.pose.position.x -
                           prediction_anchor_local_odometry_.pose.pose.position.x;
-  const double local_dy = local_odometry_.pose.pose.position.y -
+  const double local_dy = aligned_local.pose.pose.position.y -
                           prediction_anchor_local_odometry_.pose.pose.position.y;
   const double cosine = std::cos(yaw_offset_rad_);
   const double sine = std::sin(yaw_offset_rad_);
@@ -347,10 +486,10 @@ bool OdometryGpsFusion::innovation_is_acceptable(
     return false;
   }
 
-  const double local_xx = local_odometry_.pose.covariance[0];
-  const double local_xy = 0.5 * (local_odometry_.pose.covariance[1] +
-                                 local_odometry_.pose.covariance[6]);
-  const double local_yy = local_odometry_.pose.covariance[7];
+  const double local_xx = aligned_local.pose.covariance[0];
+  const double local_xy = 0.5 * (aligned_local.pose.covariance[1] +
+                                 aligned_local.pose.covariance[6]);
+  const double local_yy = aligned_local.pose.covariance[7];
   const double rotated_xx = cosine * cosine * local_xx +
                             sine * sine * local_yy -
                             2.0 * sine * cosine * local_xy;
@@ -506,13 +645,43 @@ OdometryGpsFusion::ProjectedPoint OdometryGpsFusion::project_to_map(
   return point;
 }
 
+// 함수이름: lever_arm_in_map
+// 기능: base_link -> gps_link 평면 레버암을 현재 base yaw로 map 좌표계에 회전한다.
+// 인자: map 좌표계 기준 base_link yaw rad
+// 반환값: map 좌표계 레버암 m
+OdometryGpsFusion::ProjectedPoint OdometryGpsFusion::lever_arm_in_map(
+    const double base_yaw_rad) const {
+  ProjectedPoint lever_arm;
+  const double cosine = std::cos(base_yaw_rad);
+  const double sine = std::sin(base_yaw_rad);
+  lever_arm.x_m = cosine * lever_arm_x_m_ - sine * lever_arm_y_m_;
+  lever_arm.y_m = sine * lever_arm_x_m_ + cosine * lever_arm_y_m_;
+  return lever_arm;
+}
+
+// 함수이름: correct_to_base_link
+// 기능: GPS 안테나 투영 위치에서 현재 레버암을 빼고 datum 자세의 레버암을 더한다.
+//       first_fix의 map 원점 계약을 유지하면서 회전 시 생기는 가짜 평행이동을 제거한다.
+// 인자: antenna_point, current_lever_arm
+// 반환값: map 좌표계 base_link 위치 m
+OdometryGpsFusion::ProjectedPoint OdometryGpsFusion::correct_to_base_link(
+    const ProjectedPoint& antenna_point,
+    const ProjectedPoint& current_lever_arm) const {
+  ProjectedPoint base_point = antenna_point;
+  base_point.x_m += reference_lever_arm_map_.x_m - current_lever_arm.x_m;
+  base_point.y_m += reference_lever_arm_map_.y_m - current_lever_arm.y_m;
+  return base_point;
+}
+
 // 함수이름: make_pose
-// 기능: 투영 위치와 회전된 GPS ENU covariance를 map pose 측정값으로 만든다.
-// 인자: message, point
+// 기능: base_link 위치와 GPS 및 yaw 레버암 불확실성을 map pose 측정값으로 만든다.
+// 인자: message, point, current_lever_arm
 // 반환값: Global EKF 입력용 PoseWithCovarianceStamped
 geometry_msgs::PoseWithCovarianceStamped OdometryGpsFusion::make_pose(
     const sensor_msgs::NavSatFix& message,
-    const ProjectedPoint& point) const {
+    const ProjectedPoint& point,
+    const ProjectedPoint& current_lever_arm,
+    const nav_msgs::Odometry& aligned_local) const {
   double variance_east = 0.0;
   double covariance_east_north = 0.0;
   double variance_north = 0.0;
@@ -542,6 +711,16 @@ geometry_msgs::PoseWithCovarianceStamped OdometryGpsFusion::make_pose(
       (cosine * cosine - sine * sine) * covariance_east_north;
   output.pose.covariance[1] = xy_covariance;
   output.pose.covariance[6] = xy_covariance;
+  // base = antenna - R(yaw)*lever. yaw에 대한 Jacobian은 [Ly, -Lx]다.
+  const double yaw_variance = aligned_local.pose.covariance[35];
+  output.pose.covariance[0] +=
+      current_lever_arm.y_m * current_lever_arm.y_m * yaw_variance;
+  const double lever_xy_covariance =
+      -current_lever_arm.x_m * current_lever_arm.y_m * yaw_variance;
+  output.pose.covariance[1] += lever_xy_covariance;
+  output.pose.covariance[6] += lever_xy_covariance;
+  output.pose.covariance[7] +=
+      current_lever_arm.x_m * current_lever_arm.x_m * yaw_variance;
   output.pose.covariance[14] = variance_up;
   output.pose.covariance[21] = unobserved_variance_;
   output.pose.covariance[28] = unobserved_variance_;
@@ -555,21 +734,46 @@ geometry_msgs::PoseWithCovarianceStamped OdometryGpsFusion::make_pose(
 // 반환값: 없음
 void OdometryGpsFusion::gps_callback(
     const sensor_msgs::NavSatFix::ConstPtr& message) {
+  const ros::Time now = ros::Time::now();
+  observe_clock(now);
   std::string reason;
+  if (!clock_ready_is_fresh()) {
+    ROS_WARN_THROTTLE(1.0, "Rejecting GPS fix: clock_not_ready");
+    return;
+  }
+  // Transport reordering/duplicates must not disturb accepted anchors or the
+  // consecutive recovery count. Only increasing, fresh measurement times enter.
+  if (!MessageValidation::validateStamp(message->header.stamp, now,
+          max_message_age_sec_, max_future_stamp_sec_, !last_received_gps_stamp_.isZero(),
+          last_received_gps_stamp_, &reason)) {
+    ROS_WARN_THROTTLE(1.0, "Discarding GPS fix without state change: %s", reason.c_str());
+    return;
+  }
+  last_received_gps_stamp_ = message->header.stamp;
   if (!validate_fix(*message, &reason)) {
+    pending_fixes_.clear();
     recovery_gate_.markUnhealthy();
     have_last_candidate_point_ = false;
     publish_relocalizing(recovery_gate_.recovering());
     ROS_WARN_THROTTLE(1.0, "Rejecting GPS fix: %s", reason.c_str());
     return;
   }
-  if (!local_odometry_is_fresh(ros::Time::now(), &reason)) {
-    recovery_gate_.markUnhealthy();
-    have_last_candidate_point_ = false;
-    publish_relocalizing(recovery_gate_.recovering());
-    ROS_WARN_THROTTLE(1.0, "Rejecting GPS fix: %s", reason.c_str());
+  if (pending_fixes_.size() >= static_cast<std::size_t>(pending_max_samples_)) {
+    ROS_WARN_THROTTLE(1.0, "Discarding GPS fix: pending_queue_full");
     return;
   }
+  pending_fixes_.push_back(PendingFix{message, ros::SteadyTime::now()});
+  process_pending();
+}
+
+void OdometryGpsFusion::process_fix(
+    const sensor_msgs::NavSatFix::ConstPtr& message,
+    const nav_msgs::Odometry& aligned_local) {
+  std::string reason;
+  const double local_yaw_rad = MessageValidation::yawFromQuaternion(
+      aligned_local.pose.pose.orientation);
+  const ProjectedPoint current_lever_arm =
+      lever_arm_in_map(local_yaw_rad + yaw_offset_rad_);
 
   if (have_last_stamp_ && recovery_gate_.acceptedOnce()) {
     const double stamp_gap_sec =
@@ -589,10 +793,20 @@ void OdometryGpsFusion::gps_callback(
     datum_.map_y_m = 0.0;
     datum_.map_z_m = 0.0;
     datum_.ready = true;
+    reference_lever_arm_map_ = current_lever_arm;
+    reference_lever_arm_ready_ = true;
     ROS_INFO("First valid GPS fix established the local map datum");
   }
 
-  const ProjectedPoint point = project_to_map(*message);
+  if (!reference_lever_arm_ready_) {
+    recovery_gate_.markUnhealthy();
+    publish_relocalizing(recovery_gate_.recovering());
+    ROS_WARN_THROTTLE(1.0, "Rejecting GPS fix: lever_arm_reference_not_ready");
+    return;
+  }
+
+  const ProjectedPoint point = correct_to_base_link(
+      project_to_map(*message), current_lever_arm);
   if (!std::isfinite(point.x_m) || !std::isfinite(point.y_m) ||
       !std::isfinite(point.z_m)) {
     recovery_gate_.markUnhealthy();
@@ -602,13 +816,19 @@ void OdometryGpsFusion::gps_callback(
     return;
   }
   const geometry_msgs::PoseWithCovarianceStamped candidate =
-      make_pose(*message, point);
+      make_pose(*message, point, current_lever_arm, aligned_local);
   latest_quality_candidate_ = candidate;
   have_latest_quality_candidate_ = true;
+  candidate_history_.push_back(CandidateRecord{candidate, aligned_local});
+  while (candidate_history_.size() > static_cast<std::size_t>(local_history_max_samples_) ||
+         (candidate.header.stamp - candidate_history_.front().pose.header.stamp).toSec() >
+             local_history_duration_sec_) {
+    candidate_history_.pop_front();
+  }
   // 승인 전 후보는 Coordinator 교차검증에만 사용한다. InterfaceAdapter가
   // Global EKF로 relay하는 공개 GPS pose와는 의도적으로 분리한다.
   candidate_publisher_.publish(candidate);
-  if (!innovation_is_acceptable(candidate, &reason)) {
+  if (!innovation_is_acceptable(candidate, aligned_local, &reason)) {
     recovery_gate_.markUnhealthy();
     have_last_candidate_point_ = false;
     publish_relocalizing(recovery_gate_.recovering());
@@ -632,7 +852,7 @@ void OdometryGpsFusion::gps_callback(
   }
   pose_publisher_.publish(candidate);
   prediction_anchor_map_ = point;
-  prediction_anchor_local_odometry_ = local_odometry_;
+  prediction_anchor_local_odometry_ = aligned_local;
   have_prediction_anchor_ = true;
   publish_relocalizing(false);
 }

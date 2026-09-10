@@ -1,5 +1,5 @@
 <launch>
-  <arg name="enable_lidar_localization" default="false"/>
+  <arg name="enable_lidar_localization" default="true"/>
   <arg name="interfaces_config" default="$(find mando_localization)/config/localization_interfaces.yaml"/>
   <arg name="lidar_config" default="$(find mando_localization)/config/lidar_localization.yaml"/>
   <arg name="gps_reference_config" default="$(find mando_localization)/config/gps_reference.yaml"/>
@@ -8,7 +8,7 @@
   <arg name="map_server_node_name" default="localization_map_server"/>
   <arg name="amcl_node_name" default="localization_amcl"/>
   <arg name="lidar_quality_gate_node_name" default="odometry_lidar_fusion"/>
-  <!-- 실제 map.yaml과 base_link -> laser_link 실측 TF가 준비될 때만 활성화한다. -->
+  <!-- 활성화 상태에서는 실제 map.yaml과 base_link -> laser_link 실측 TF가 필수다. -->
   <group if="$(arg enable_lidar_localization)">
     <node pkg="map_server" type="map_server" name="$(arg map_server_node_name)"
           args="$(arg map_file)" output="screen">

@@ -3,7 +3,8 @@ encoder_to_twist_adapter.hpp
 - 역할: 차량 엔코더 속도를 robot_localization이 소비할 수 있는
         geometry_msgs/TwistWithCovarianceStamped로 변환한다.
 - 입력 단위: SerialFeedBack.speed는 m/s, encoder는 최근 100 ms 증분이다.
-- 출력 단위/frame: linear.x m/s, base_link frame. yaw rate는 IMU가 담당한다.
+- 출력 단위/frame: linear.x m/s, base_link frame. 활성 시 비홀로노믹
+                   linear.y=0 제약을 함께 제공하고 yaw rate는 IMU가 담당한다.
 - 실패 경로: alive counter 정체, NaN, 과도한 속도나 encoder delta는 발행하지 않는다.
 */
 #pragma once
@@ -28,7 +29,7 @@ class EncoderToTwistAdapter {
       const erp42_msgs::SerialFeedBack& message, const ros::Time& receipt_stamp,
       const std::string& base_link_frame,
       double speed_scale, int direction_sign, double speed_variance,
-      double unobserved_variance);
+      double lateral_velocity_variance, double unobserved_variance);
 
  private:
   void load_configuration();
@@ -52,6 +53,9 @@ class EncoderToTwistAdapter {
   double max_abs_speed_mps_ = 0.0;
   int max_abs_encoder_delta_100ms_ = 0;
   double speed_variance_m2ps2_ = 0.0;
+  double lateral_velocity_variance_m2ps2_ = 0.0;
+  std::string lateral_velocity_calibration_state_;
+  std::string lateral_velocity_source_;
   double unobserved_variance_ = 0.0;
   bool require_alive_counter_change_ = true;
   std::string calibration_state_;

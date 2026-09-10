@@ -5,7 +5,7 @@
   <arg name="gps_reference_config" default="$(find mando_localization)/config/gps_reference.yaml"/>
   <arg name="tf_config" default="$(find mando_localization)/config/tf_configuration.yaml"/>
   <arg name="enable_gps_fusion" default="true"/>
-  <arg name="enable_lidar_localization" default="false"/>
+  <arg name="enable_lidar_localization" default="true"/>
   <!-- deprecated compatibility alias: 새 호출은 start_supervisor를 사용한다. -->
   <arg name="start_status_manager" default="true"/>
   <arg name="start_supervisor" default="$(arg start_status_manager)"/>

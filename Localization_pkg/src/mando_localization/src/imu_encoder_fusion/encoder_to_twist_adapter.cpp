@@ -29,7 +29,8 @@ EncoderToTwistAdapter::convertSpeedToTwist(
     const erp42_msgs::SerialFeedBack& message,
     const ros::Time& receipt_stamp, const std::string& base_link_frame,
     const double speed_scale, const int direction_sign,
-    const double speed_variance, const double unobserved_variance) {
+    const double speed_variance, const double lateral_velocity_variance,
+    const double unobserved_variance) {
   geometry_msgs::TwistWithCovarianceStamped output;
   output.header.stamp = receipt_stamp;
   output.header.frame_id = base_link_frame;
@@ -39,7 +40,7 @@ EncoderToTwistAdapter::convertSpeedToTwist(
   std::fill(output.twist.covariance.begin(), output.twist.covariance.end(),
             0.0);
   output.twist.covariance[0] = speed_variance;
-  output.twist.covariance[7] = unobserved_variance;
+  output.twist.covariance[7] = lateral_velocity_variance;
   output.twist.covariance[14] = unobserved_variance;
   output.twist.covariance[21] = unobserved_variance;
   output.twist.covariance[28] = unobserved_variance;
@@ -82,6 +83,12 @@ void EncoderToTwistAdapter::load_configuration() {
       private_node_, "encoder/max_abs_encoder_delta_100ms");
   speed_variance_m2ps2_ = requireParameter<double>(
       private_node_, "encoder/speed_variance_m2ps2");
+  lateral_velocity_variance_m2ps2_ = requireParameter<double>(
+      private_node_, "encoder/lateral_velocity_constraint/variance_m2ps2");
+  lateral_velocity_calibration_state_ = requireParameter<std::string>(
+      private_node_, "encoder/lateral_velocity_constraint/calibration_state");
+  lateral_velocity_source_ = requireParameter<std::string>(
+      private_node_, "encoder/lateral_velocity_constraint/source");
   unobserved_variance_ = requireParameter<double>(
       private_node_, "encoder/unobserved_variance");
   require_alive_counter_change_ = requireParameter<bool>(
@@ -124,6 +131,21 @@ void EncoderToTwistAdapter::load_configuration() {
   }
   requireProbabilityVariance(speed_variance_m2ps2_,
                              "encoder/speed_variance_m2ps2");
+  requireProbabilityVariance(
+      lateral_velocity_variance_m2ps2_,
+      "encoder/lateral_velocity_constraint/variance_m2ps2");
+  if (lateral_velocity_calibration_state_ != "unmeasured" &&
+      lateral_velocity_calibration_state_ != "model_assumption" &&
+      lateral_velocity_calibration_state_ != "measured" &&
+      lateral_velocity_calibration_state_ != "verified") {
+    throw std::runtime_error(
+        "encoder/lateral_velocity_constraint/calibration_state is invalid");
+  }
+  if (lateral_velocity_calibration_state_ == "unmeasured" ||
+      lateral_velocity_source_.empty()) {
+    throw std::runtime_error(
+        "lateral velocity constraint requires state and source");
+  }
   requireFinitePositive(unobserved_variance_,
                         "encoder/unobserved_variance");
   if (calibration_state_ != "unmeasured" &&
@@ -207,7 +229,7 @@ bool EncoderToTwistAdapter::validate_measurement(
 }
 
 // 함수이름: make_twist
-// 기능: 승인된 speed_mps를 차체 전진 속도로 전달하고 나머지 축을 미관측 처리한다.
+// 기능: 승인된 speed_mps와 비홀로노믹 횡속도 0 제약을 전달한다.
 // 인자: message
 // 반환값: base_link frame TwistWithCovarianceStamped
 geometry_msgs::TwistWithCovarianceStamped
@@ -217,6 +239,7 @@ EncoderToTwistAdapter::make_twist(
   // steering_adc만으로 정확한 yaw rate를 만들지 않는다. Z 각속도는 IMU가 제공한다.
   return convertSpeedToTwist(message, receipt_stamp, base_link_frame_, speed_scale_,
                              direction_sign_, speed_variance_m2ps2_,
+                             lateral_velocity_variance_m2ps2_,
                              unobserved_variance_);
 }
 

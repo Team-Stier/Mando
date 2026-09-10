@@ -9,6 +9,7 @@
   <arg name="encoder_driver_config" default="$(find mando_localization)/config/encoder_driver.yaml"/>
   <arg name="imu_driver_config" default="$(find mando_localization)/config/imu_driver.yaml"/>
   <arg name="gps_driver_config" default="$(find mando_localization)/config/gps_driver.yaml"/>
+  <arg name="time_sync_config" default="$(find mando_localization)/config/time_sync.yaml"/>
   <!-- 드라이버 출력은 어댑터가 차량별 공개 토픽으로 전달한다. -->
   <arg name="imu_raw_topic" default="/mando_localization/internal/driver/imu"/>
   <arg name="gps_fix_topic" default="/mando_localization/internal/driver/gps_fix"/>
@@ -31,11 +32,13 @@
 
   <group if="$(arg start_gps_driver)">
     <node pkg="ublox_gps" type="ublox_gps"
-          name="$(arg gps_driver_node_name)" output="screen" clear_params="true">
+          name="$(arg gps_driver_node_name)" output="screen" clear_params="true"
+          launch-prefix="rosrun mando_localization check_time_sync.py --config &quot;$(arg time_sync_config)&quot; --gps-config &quot;$(arg gps_driver_config)&quot; --exec">
       <rosparam command="load" file="$(arg gps_driver_config)"/>
       <!-- ublox_gps는 두 토픽을 private(~) 이름으로 발행한다. -->
       <remap from="~fix" to="$(arg gps_fix_topic)"/>
       <remap from="~navpvt" to="/mando_localization/internal/driver/gps_navpvt"/>
+      <remap from="~timing" to="/mando_localization/internal/driver/gps_timing"/>
     </node>
   </group>
 </launch>

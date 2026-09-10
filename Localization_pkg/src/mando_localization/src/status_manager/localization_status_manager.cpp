@@ -53,7 +53,7 @@ LocalizationStatusManager::LocalizationStatusManager(ros::NodeHandle nh,
         return policy;
       }()) {
   const std::string imu_topic =
-      requireParameter<std::string>(private_nh_, "topics/imu_normalized");
+      requireParameter<std::string>(private_nh_, "topics/imu_calibrated");
   const std::string encoder_topic =
       requireParameter<std::string>(private_nh_, "topics/encoder_state");
   const std::string twist_topic =

@@ -13,6 +13,27 @@ reference:
   map_z_m: 0.0
   require_measured_datum_for_lidar: true
 
+# NavSatFix는 gps_link(안테나 위상 중심)의 위치다. Global EKF에는 base_link
+# 위치를 넣어야 하므로 GPS 측정 시각의 Local Odometry yaw로 레버암을 map 좌표계에
+# 회전한 뒤 제거한다. x/y는 base_link -> gps_link 기준이다.
+lever_arm:
+  x_m: 0.65
+  y_m: 0.0
+  # 기존 키 유지: 이제 GPS를 둘러싼 Local 보간 표본 사이의 최대 간격이다.
+  # 최신 Local과 GPS 측정 시각의 차이는 이 값으로 제한하지 않는다.
+  max_yaw_stamp_skew_sec: 0.10
+  manual_datum_base_yaw_rad: 0.0
+  calibration_state: provisional
+  source: "user_report_2026-09-04_longitudinal_only"
+
+timing:
+  local_history_duration_sec: 2.0
+  local_history_max_samples: 200
+  pending_wait_sec: 0.10
+  pending_max_samples: 20
+  require_clock_ready: true
+  clock_ready_timeout_sec: 3.0
+
 quality:
   minimum_fix_status: 0
   max_message_age_sec: 1.0
