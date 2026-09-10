@@ -10,11 +10,8 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   message_generation
   nav_msgs
-  pluginlib
   robot_localization
   roscpp
-  roslib
-  rviz
   sensor_msgs
   std_msgs
   tf2
@@ -22,6 +19,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_ros
   topic_tools
   visualization_msgs
+  ublox_msgs
 )
 
 add_message_files(
@@ -33,9 +31,6 @@ generate_messages(
   DEPENDENCIES
     geometry_msgs
 )
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(QT5_WIDGETS REQUIRED Qt5Widgets)
-find_program(QT_MOC_EXECUTABLE moc REQUIRED)
 
 catkin_package(
   LIBRARIES
@@ -51,18 +46,15 @@ catkin_package(
     mando_localization_output_gate
     mando_localization_tf
     mando_localization_visualization
-    mando_localization_rviz_plugins
   CATKIN_DEPENDS
-    diagnostic_msgs erp42_msgs geometry_msgs message_runtime nav_msgs pluginlib robot_localization roscpp
-    roslib rviz sensor_msgs std_msgs tf2 tf2_geometry_msgs tf2_ros topic_tools visualization_msgs
+    diagnostic_msgs erp42_msgs geometry_msgs message_runtime nav_msgs robot_localization roscpp
+    sensor_msgs std_msgs tf2 tf2_geometry_msgs tf2_ros topic_tools visualization_msgs ublox_msgs
 )
 
 include_directories(
   src
   ${catkin_INCLUDE_DIRS}
-  ${QT5_WIDGETS_INCLUDE_DIRS}
 )
-link_directories(${QT5_WIDGETS_LIBRARY_DIRS})
 
 add_library(mando_localization_common
   src/common/consecutive_recovery_gate.cpp
@@ -134,11 +126,6 @@ add_library(mando_localization_status
 )
 add_dependencies(mando_localization_status ${catkin_EXPORTED_TARGETS})
 target_link_libraries(mando_localization_status ${catkin_LIBRARIES})
-add_executable(localization_status_manager_node
-  src/status_manager/localization_status_manager_node.cpp
-)
-add_dependencies(localization_status_manager_node ${catkin_EXPORTED_TARGETS})
-target_link_libraries(localization_status_manager_node mando_localization_status ${catkin_LIBRARIES})
 
 add_library(mando_relocalization
   src/relocalization/relocalization_policy.cpp
@@ -200,38 +187,12 @@ add_executable(localization_visualization_node
 )
 target_link_libraries(localization_visualization_node mando_localization_visualization ${catkin_LIBRARIES})
 
-set(RVIZ_PANEL_HEADER
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/rviz_plugins/localization_status_panel.hpp
-)
-set(RVIZ_PANEL_MOC ${CMAKE_CURRENT_BINARY_DIR}/moc_localization_status_panel.cpp)
-set(MOC_INCLUDE_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}/src")
-foreach(MOC_INCLUDE_DIR ${QT5_WIDGETS_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS})
-  list(APPEND MOC_INCLUDE_FLAGS "-I${MOC_INCLUDE_DIR}")
-endforeach()
-add_custom_command(
-  OUTPUT ${RVIZ_PANEL_MOC}
-  COMMAND ${QT_MOC_EXECUTABLE} ${MOC_INCLUDE_FLAGS} ${RVIZ_PANEL_HEADER} -o ${RVIZ_PANEL_MOC}
-  DEPENDS ${RVIZ_PANEL_HEADER}
-  COMMENT "Generating Qt meta-object code for LocalizationStatusPanel"
-  VERBATIM
-)
-add_library(mando_localization_rviz_plugins
-  src/rviz_plugins/localization_status_panel.cpp
-  ${RVIZ_PANEL_MOC}
-)
-target_link_libraries(mando_localization_rviz_plugins
-  ${catkin_LIBRARIES}
-  ${QT5_WIDGETS_LIBRARIES}
-)
-target_compile_options(mando_localization_rviz_plugins PRIVATE ${QT5_WIDGETS_CFLAGS_OTHER})
-
 set(MANDO_NODE_TARGETS
   localization_interface_adapter_node
   encoder_to_twist_adapter_node
   imu_normalizer_node
   odometry_gps_fusion_node
   odometry_lidar_fusion_node
-  localization_status_manager_node
   localization_supervisor_node
   localization_output_gate_node
   static_transform_publisher_node
@@ -250,7 +211,6 @@ set(MANDO_LIBRARY_TARGETS
   mando_localization_output_gate
   mando_localization_tf
   mando_localization_visualization
-  mando_localization_rviz_plugins
 )
 
 install(TARGETS ${MANDO_NODE_TARGETS} ${MANDO_LIBRARY_TARGETS}
@@ -258,13 +218,22 @@ install(TARGETS ${MANDO_NODE_TARGETS} ${MANDO_LIBRARY_TARGETS}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
-install(FILES plugin_description.xml
+install(DIRECTORY config docs launch maps udev
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
-install(DIRECTORY config docs launch maps rviz udev
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+catkin_install_python(PROGRAMS
+  scripts/calibrated_imu_core.py
+  scripts/calibrated_imu_node.py
+  scripts/timing_core.py
+  scripts/check_time_sync.py
+  scripts/sensor_timing_monitor.py
+  scripts/localization_viewer.py
+  scripts/lidar_front_scan_visualizer.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
-install(PROGRAMS scripts/render_architecture.sh
+install(PROGRAMS
+  scripts/localization_command.sh
+  scripts/localization_record_command.sh
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
@@ -347,6 +316,15 @@ if(CATKIN_ENABLE_TESTING)
     )
   endif()
 
+  catkin_add_gtest(test_local_odometry_history
+    test/gtest_main.cpp
+    test/test_local_odometry_history.cpp
+  )
+  if(TARGET test_local_odometry_history)
+    target_link_libraries(test_local_odometry_history
+      mando_localization_common ${catkin_LIBRARIES})
+  endif()
+
   add_rostest(test/synthetic_lidar_localization.test
     DEPENDENCIES odometry_lidar_fusion_node localization_interface_adapter_node
   )
@@ -356,9 +334,38 @@ if(CATKIN_ENABLE_TESTING)
   add_rostest(test/gps_gate_reanchor.test
     DEPENDENCIES odometry_gps_fusion_node
   )
+  add_rostest(test/delayed_gps_alignment.test
+    DEPENDENCIES odometry_gps_fusion_node
+  )
+  add_rostest(test/gps_clock_ready.test
+    DEPENDENCIES odometry_gps_fusion_node
+  )
+  add_rostest(test/delayed_gps_ekf.test
+    DEPENDENCIES odometry_gps_fusion_node localization_interface_adapter_node
+                 imu_normalizer_node encoder_to_twist_adapter_node
+                 localization_supervisor_node localization_output_gate_node
+                 static_transform_publisher_node
+  )
   add_rostest(test/gps_only_relocalization.test
     DEPENDENCIES localization_supervisor_node
   )
+  add_rostest(test/calibrated_imu.test
+    DEPENDENCIES imu_normalizer_node localization_interface_adapter_node
+                 encoder_to_twist_adapter_node static_transform_publisher_node
+  )
+  add_rostest(test/initial_heading.test
+    DEPENDENCIES imu_normalizer_node localization_interface_adapter_node
+                 encoder_to_twist_adapter_node
+  )
+  add_rostest(test/encoder_yaw_hold.test
+    DEPENDENCIES imu_normalizer_node localization_interface_adapter_node
+                 encoder_to_twist_adapter_node static_transform_publisher_node
+  )
 
+  catkin_add_nosetests(test/test_localization_viewer.py)
   catkin_add_nosetests(test/test_configuration.py)
+  catkin_add_nosetests(test/test_calibrated_imu.py)
+  catkin_add_nosetests(test/test_encoder_yaw_hold.py)
+  catkin_add_nosetests(test/test_sensor_timing.py)
+  catkin_add_nosetests(test/test_lidar_front_scan_visualizer.py)
 endif()

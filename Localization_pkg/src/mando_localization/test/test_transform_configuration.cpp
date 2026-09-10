@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 
 #include <cmath>
 
@@ -53,6 +54,25 @@ TEST(TransformConfigurationTest, ConvertsDegreesToNormalizedQuaternion) {
       TransformConfiguration::toMessage(spec, ros::Time(1.0));
   EXPECT_NEAR(std::sqrt(0.5), message.transform.rotation.z, 1.0e-9);
   EXPECT_NEAR(std::sqrt(0.5), message.transform.rotation.w, 1.0e-9);
+}
+
+TEST(TransformConfigurationTest, UpsideDownRearFacingLidarPreservesLeftAxis) {
+  StaticTransformSpec spec = transform("base_link", "laser_link");
+  spec.x_m = 1.05;
+  spec.roll_deg = 180.0;
+  spec.yaw_deg = 180.0;
+  const auto message = TransformConfiguration::toMessage(spec, ros::Time(1.0));
+  const auto& q = message.transform.rotation;
+  const tf2::Matrix3x3 rotation(tf2::Quaternion(q.x, q.y, q.z, q.w));
+  // laser +X points rearward, +Y stays left, and +Z points downward.
+  const double expected[] = {-1.0, 1.0, -1.0};
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      EXPECT_NEAR(row == column ? expected[row] : 0.0,
+                  rotation[row][column], 1.0e-9);
+    }
+  }
+  EXPECT_DOUBLE_EQ(1.05, message.transform.translation.x);
 }
 
 }  // namespace

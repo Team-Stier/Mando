@@ -13,12 +13,14 @@ TEST(EncoderToTwistAdapterTest, AppliesScaleAndDirectionWithoutInventingYawRate)
   const geometry_msgs::TwistWithCovarianceStamped output =
       EncoderToTwistAdapter::convertSpeedToTwist(
           message, ros::Time(10.0), "base_link", 1.2, -1, 0.25,
-          1000000.0);
+          0.01, 1000000.0);
   EXPECT_EQ(ros::Time(10.0), output.header.stamp);
   EXPECT_EQ("base_link", output.header.frame_id);
   EXPECT_DOUBLE_EQ(-3.0, output.twist.twist.linear.x);
+  EXPECT_DOUBLE_EQ(0.0, output.twist.twist.linear.y);
   EXPECT_DOUBLE_EQ(0.0, output.twist.twist.angular.z);
   EXPECT_DOUBLE_EQ(0.25, output.twist.covariance[0]);
+  EXPECT_DOUBLE_EQ(0.01, output.twist.covariance[7]);
   EXPECT_DOUBLE_EQ(1000000.0, output.twist.covariance[35]);
 }
 

@@ -54,8 +54,9 @@ GPS gate나 EKF가 그 값을 GPS 원시 측정에서 새로 계산하는 구조
 
 ## 정상·짧은 단절: Local Odometry 비교
 
-GPS gate는 직전 승인 GPS와 당시 Local Odometry를 anchor로 저장합니다. 현재
-Local Odometry 증분으로 예상 map 위치를 만든 뒤 다음을 검사합니다.
+GPS gate는 직전 승인 GPS와 그 측정 시각의 Local Odometry를 anchor로 저장합니다.
+새 GPS 측정 시각에 보간한 Local 증분으로 예상 map 위치를 만든 뒤 다음을 검사합니다.
+clock_ready와 이력 정합 조건은 [센서 시각 문서](sensor_timing.md)를 참고합니다.
 
 ```text
 Euclidean innovation <= 10.0 m
@@ -102,9 +103,10 @@ LiDAR↔Global 거리 일관성으로 간접 감시할 뿐입니다.
 
 후보 3회가 통과해도 바로 공개하지 않습니다. Coordinator가 0이 아닌 증가
 `transaction_id`와 pose를 `GpsGateReanchor` 명령으로 보냅니다. GPS gate는
-최신 quality candidate와 명령의 거리 2.0 m 이하, stamp 차이 1.0초 이하,
-fresh Local Odometry, map frame·수치·quaternion·covariance를 확인한 뒤 prediction
-anchor를 실제 적용합니다. 적용 후 같은 transaction을 ACK하며, Coordinator는
+명령과 같은 timestamp의 quality candidate 이력이 있어야 하고 그 후보와의 거리가
+2.0 m 이하여야 합니다. clock_ready, 명령 age·미래 시각 한계, fresh Local Odometry,
+map frame·수치·quaternion·covariance를 확인한 뒤 해당 후보 시각의 Local pose로
+prediction anchor를 실제 적용합니다. 적용 후 같은 transaction을 ACK하며, Coordinator는
 transaction ID, stamp와 XY가 요청과 일치할 때만 GPS pose를 공개합니다.
 ACK가 1.0초 안에 없거나 다르면 `RELOCALIZING`, `valid=false`를 유지합니다.
 
@@ -150,14 +152,13 @@ yaw·Z·나머지 covariance 보존 결과까지 검증하는 것은 아닙니�
 
 ## 현재 기본값에서의 결과
 
-- LiDAR localization: `false`
+- `localization`·`replay.launch`의 LiDAR localization: `false`
+- 범용 `bringup.launch`의 LiDAR localization: `true` (실제 지도 필요)
 - GPS-only automatic reset: `false`
 - GPS datum: `first_fix`, `measured: false`
 - 실제 `maps/map.yaml`: 없음
-- `/dev/mando_gps` 별칭과 `ublox_gps`: 현재 호스트에서 없음
-- 마지막 실장치 확인 GPS: NMEA 통신은 됐지만 no-fix
 
-따라서 현재 기본 실행은 장기 단절 후 임의 위치 점프를 하지 않습니다. 단기
+따라서 지도 없는 `localization` 기본 실행은 장기 단절 후 임의 위치 점프를 하지 않습니다. 단기
 gate로 안전하게 복귀하지 못하면 복구 상태를 유지하고 최종 위치를 차단합니다.
 
 ## 재연결 확인 순서

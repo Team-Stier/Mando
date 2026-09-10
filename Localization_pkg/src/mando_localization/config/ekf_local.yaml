@@ -3,7 +3,10 @@ frequency: 30.0
 sensor_timeout: 0.15
 two_d_mode: true
 transform_time_offset: 0.0
-transform_timeout: 0.05
+# 30 Hz(33 ms) 주기를 TF 대기로 막지 않는다. 센서 정적 TF는 시작 시 발행한다.
+transform_timeout: 0.0
+# GPS 보간용 Local/TF 이력을 현재 필터 시각으로 발행한다.
+predict_to_current_time: true
 print_diagnostics: true
 debug: false
 publish_tf: true
@@ -15,10 +18,11 @@ odom_frame: odom
 base_link_frame: base_link
 world_frame: odom
 
+# vx와 함께 rear_axle_center의 비홀로노믹 vy=0 모델 제약을 사용한다.
 twist0: /mando_localization/internal/ekf/twist
 twist0_config: [false, false, false,
                 false, false, false,
-                true,  false, false,
+                true,  true,  false,
                 false, false, false,
                 false, false, false]
 twist0_queue_size: 10

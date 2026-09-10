@@ -1,0 +1,12 @@
+/build/
+/devel/
+/install/
+/logs/
+/.codex-runtime/
+/records/
+/rosbag/
+/snapshots/
+__pycache__/
+*.py[cod]
+*.bag
+*.bag.active

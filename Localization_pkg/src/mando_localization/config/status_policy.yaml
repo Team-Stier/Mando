@@ -3,7 +3,8 @@ startup_grace_sec: 3.0
 
 devices:
   imu: /dev/imu
-  gps: /dev/mando_gps
+  # GPS 드라이버가 실제로 여는 수신기 고유 포트와 동일하게 검사한다.
+  gps: /dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00
 
 quality:
   max_position_variance_m2: 25.0
@@ -30,7 +31,7 @@ sources:
 
 absolute_sources:
   gps_enabled: true
-  lidar_enabled: false
+  lidar_enabled: true
   recovery_consecutive_measurements: 3
   conflicting_sources_enter_relocalizing: true
   max_cross_source_distance_m: 5.0

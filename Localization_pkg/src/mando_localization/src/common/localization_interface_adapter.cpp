@@ -41,6 +41,8 @@ LocalizationInterfaceAdapter::LocalizationInterfaceAdapter(
       requireParameter<std::string>(private_node_, "topics/gps_navpvt");
   const std::string imu_normalized =
       requireParameter<std::string>(private_node_, "topics/imu_normalized");
+  const std::string imu_calibrated =
+      requireParameter<std::string>(private_node_, "topics/imu_calibrated");
   const std::string encoder_twist =
       requireParameter<std::string>(private_node_, "topics/encoder_twist");
   const std::string gps_map_pose =
@@ -57,7 +59,7 @@ LocalizationInterfaceAdapter::LocalizationInterfaceAdapter(
       requireParameter<std::string>(private_node_, "topics/initialpose");
   const std::string public_topics[] = {
       imu_data,       gps_fix,       public_gps_navpvt_topic_,
-      imu_normalized, encoder_twist, gps_map_pose,
+      imu_normalized, imu_calibrated, encoder_twist, gps_map_pose,
       lidar_map_pose, local_odometry, global_odometry,
       map,            initialpose};
   std::set<std::string> unique_public_topics;
@@ -71,7 +73,9 @@ LocalizationInterfaceAdapter::LocalizationInterfaceAdapter(
       {imu_data, kDriverImuTopic},
       {gps_fix, kDriverGpsTopic},
       {public_gps_navpvt_topic_, kDriverGpsNavPvtTopic},
+      // 보정 노드의 upstream도 EKF 입력에 alias되면 보정 결과가 다시 입력된다.
       {imu_normalized, kEkfImuTopic},
+      {imu_calibrated, kEkfImuTopic},
       {encoder_twist, kEkfTwistTopic},
       {gps_map_pose, kEkfGpsPoseTopic},
       {lidar_map_pose, kEkfLidarPoseTopic},
@@ -120,7 +124,7 @@ LocalizationInterfaceAdapter::LocalizationInterfaceAdapter(
       kDriverGpsNavPvtTopic, 20,
       &LocalizationInterfaceAdapter::gpsNavPvtDriverCallback, this);
   imu_subscriber_ = node_.subscribe(
-      imu_normalized, 50, &LocalizationInterfaceAdapter::imuCallback, this);
+      imu_calibrated, 50, &LocalizationInterfaceAdapter::imuCallback, this);
   twist_subscriber_ = node_.subscribe(
       encoder_twist, 50, &LocalizationInterfaceAdapter::twistCallback, this);
   gps_pose_subscriber_ = node_.subscribe(
@@ -141,6 +145,7 @@ LocalizationInterfaceAdapter::LocalizationInterfaceAdapter(
 
   ROS_INFO_STREAM("LocalizationInterfaceAdapter 설정: IMU=" << imu_data
                   << " -> " << imu_normalized
+                  << " -> " << imu_calibrated
                   << ", Twist=" << encoder_twist
                   << ", Local/Global=" << local_odometry << "/"
                   << global_odometry << ", Map/Initialpose=" << map << "/"

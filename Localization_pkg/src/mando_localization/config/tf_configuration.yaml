@@ -19,20 +19,21 @@ dynamic_transforms:
     owner_node: imu_encoder_local_ekf
     source: robot_localization_local
 
-# 현재 종방향 X만 확인됐다. Y/Z와 RPY를 정밀 측정한 뒤 enabled와
-# calibration_state를 바꾼다. 미측정 축의 0은 자리표시자다.
+# IMU 장착 위치와 방향은 2026-09-06 사용자 확인값이다.
+# GPS의 미측정 축 0은 자리표시자다. LiDAR 위치는 2026-09-05,
+# 위아래 뒤집힘과 후방 장착 방향은 2026-09-07 사용자 확인값이다.
 static_transforms:
   - parent_frame: base_link
     child_frame: imu_link
-    translation_m: [0.25, 0.0, 0.0]
+    translation_m: [0.20, 0.0, 0.0]
     rotation_rpy_deg: [0.0, 0.0, 0.0]
-    enabled: false
-    calibration_state: unmeasured
+    enabled: true
+    calibration_state: verified
     measured_at: ""
-    source: user_report_2026-08-30_longitudinal_only
+    source: user_confirmed_mount_position_and_axes_2026-09-06
   - parent_frame: base_link
     child_frame: gps_link
-    translation_m: [0.0, 0.0, 0.0]
+    translation_m: [0.65, 0.0, 0.0]
     rotation_rpy_deg: [0.0, 0.0, 0.0]
     enabled: false
     calibration_state: unmeasured
@@ -41,8 +42,10 @@ static_transforms:
   - parent_frame: base_link
     child_frame: laser_link
     translation_m: [1.05, 0.0, 0.0]
-    rotation_rpy_deg: [0.0, 0.0, 0.0]
-    enabled: false
-    calibration_state: unmeasured
-    measured_at: ""
-    source: user_report_2026-08-30_longitudinal_only
+    # roll=180: 윗면이 아래, yaw=180: 전방 축이 차량 뒤쪽.
+    # 장착 회전은 TF에서만 적용하며 lidar_driver.yaml의 inverted=false를 유지한다.
+    rotation_rpy_deg: [180.0, 0.0, 180.0]
+    enabled: true
+    calibration_state: measured
+    measured_at: "2026-09-05"
+    source: user_confirmed_position_2026-09-05_upside_down_rear_facing_2026-09-07

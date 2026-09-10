@@ -7,6 +7,7 @@
               file="$(find mando_localization)/config/gps_reference.yaml"/>
     <rosparam command="load"
               file="$(find mando_localization)/config/status_policy.yaml"/>
+    <param name="timing/require_clock_ready" value="false"/>
   </node>
 
   <test test-name="gps_gate_reanchor_ack"
