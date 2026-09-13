@@ -47,6 +47,9 @@ LocalizationOutputGate::LocalizationOutputGate(ros::NodeHandle nh, ros::NodeHand
       private_nh_, "output_gate/require_map_frame");
   const bool publish_last_pose_when_invalid = requireParameter<bool>(
       private_nh_, "output_gate/publish_last_pose_when_invalid");
+  private_nh_.param("initialization/required", initialization_required_, false);
+  private_nh_.param("initialization/ready_timeout_sec",
+                    initialization_ready_timeout_sec_, 0.5);
   if (map_frame_.empty() || base_frame_.empty() || !std::isfinite(max_odometry_age_sec_) ||
       max_odometry_age_sec_ <= 0.0 || !std::isfinite(max_valid_age_sec_) ||
       max_valid_age_sec_ <= 0.0 || !std::isfinite(max_future_stamp_sec_) ||
@@ -54,7 +57,9 @@ LocalizationOutputGate::LocalizationOutputGate(ros::NodeHandle nh, ros::NodeHand
       max_position_variance_m2_ <= 0.0 || !std::isfinite(max_quaternion_error_) ||
       max_quaternion_error_ <= 0.0 || !std::isfinite(max_covariance_diagonal_) ||
       max_covariance_diagonal_ <= 0.0 || !require_finite_values ||
-      !require_map_frame || publish_last_pose_when_invalid) {
+      !require_map_frame || publish_last_pose_when_invalid ||
+      !std::isfinite(initialization_ready_timeout_sec_) ||
+      initialization_ready_timeout_sec_ <= 0.0) {
     throw std::runtime_error("Output Gate frame 또는 timeout 설정이 유효하지 않습니다.");
   }
 
@@ -63,6 +68,11 @@ LocalizationOutputGate::LocalizationOutputGate(ros::NodeHandle nh, ros::NodeHand
   odometry_subscriber_ =
       nh_.subscribe(input_topic, 50, &LocalizationOutputGate::odometryCallback, this);
   output_publisher_ = nh_.advertise<nav_msgs::Odometry>(output_topic, 20);
+  if (initialization_required_) {
+    initialization_ready_subscriber_ = nh_.subscribe(
+        "/mando_localization/internal/initialization/ready", 10,
+        &LocalizationOutputGate::initializationReadyCallback, this);
+  }
 
   ROS_INFO_STREAM("LocalizationOutputGate 설정: " << input_topic << " -> " << output_topic
                   << ", frame=" << map_frame_ << "/" << base_frame_);
@@ -124,12 +134,37 @@ bool LocalizationOutputGate::validateOdometry(
 }
 
 void LocalizationOutputGate::validCallback(const std_msgs::BoolConstPtr& message) {
-  valid_ = message->data;
+  valid_ = message->data && initializationReady(ros::Time::now());
   valid_receipt_time_ = ros::Time::now();
+}
+
+void LocalizationOutputGate::initializationReadyCallback(
+    const std_msgs::BoolConstPtr& message) {
+  initialization_ready_ = message->data;
+  initialization_ready_receipt_time_ = ros::Time::now();
+  initialization_ready_wall_time_ = ros::WallTime::now();
+  if (!message->data) {
+    valid_ = false;
+    valid_receipt_time_ = ros::Time();
+  }
+}
+
+bool LocalizationOutputGate::initializationReady(const ros::Time& now) const {
+  if (!initialization_required_) return true;
+  if (!initialization_ready_ || initialization_ready_receipt_time_.isZero() ||
+      initialization_ready_wall_time_.isZero()) return false;
+  const double age = (now - initialization_ready_receipt_time_).toSec();
+  const double wall_age = (ros::WallTime::now() - initialization_ready_wall_time_).toSec();
+  return age >= 0.0 && age <= initialization_ready_timeout_sec_ &&
+         wall_age >= 0.0 && wall_age <= initialization_ready_timeout_sec_;
 }
 
 void LocalizationOutputGate::odometryCallback(const nav_msgs::OdometryConstPtr& message) {
   const ros::Time now = ros::Time::now();
+  if (!initializationReady(now)) {
+    ROS_WARN_THROTTLE(2.0, "LocalizationOutputGate: RDDF 초기화 승인을 기다립니다.");
+    return;
+  }
   const double valid_age = (now - valid_receipt_time_).toSec();
   if (!valid_ || valid_receipt_time_.isZero() ||
       !std::isfinite(valid_age) || valid_age < 0.0 ||

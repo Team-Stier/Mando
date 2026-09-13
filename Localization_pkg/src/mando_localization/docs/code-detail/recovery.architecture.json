@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "03 장기 GPS 단절과 복구",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1160,
+      650
+    ]
+  },
+  "components": [
+    {
+      "id": "recovery0",
+      "type": "backend",
+      "label": "장기 단절 감지",
+      "sublabel": "이전 anchor + 2초 초과",
+      "pos": [
+        60,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "recovery1",
+      "type": "security",
+      "label": "복구 경로 선택",
+      "sublabel": "LiDAR 비교 또는 GPS-only",
+      "pos": [
+        455,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "recovery2",
+      "type": "security",
+      "label": "GPS-only 조건부 reset",
+      "sublabel": "기본 OFF",
+      "pos": [
+        850,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "recovery3",
+      "type": "security",
+      "label": "gate reanchor 요청",
+      "sublabel": "transaction ID",
+      "pos": [
+        850,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "recovery4",
+      "type": "security",
+      "label": "ACK 일치 검사",
+      "sublabel": "ID · stamp · XY",
+      "pos": [
+        455,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "recovery5",
+      "type": "backend",
+      "label": "대기 시간 초과",
+      "sublabel": "복구 상태 유지",
+      "pos": [
+        60,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "recoveryedge0",
+      "from": "recovery0",
+      "to": "recovery1",
+      "label": "새 후보"
+    },
+    {
+      "id": "recoveryedge1",
+      "from": "recovery1",
+      "to": "recovery2",
+      "label": "GPS-only 조건부"
+    },
+    {
+      "id": "recoveryedge2",
+      "from": "recovery2",
+      "to": "recovery3",
+      "label": "Global 확인 후",
+      "labelAt": [
+        975,
+        280
+      ]
+    },
+    {
+      "id": "recoveryedge3",
+      "from": "recovery3",
+      "to": "recovery4",
+      "label": "ACK 수신"
+    },
+    {
+      "id": "recoveryedge4",
+      "from": "recovery4",
+      "to": "recovery5",
+      "label": "미완료 시 감시"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "처리 기준",
+      "items": [
+        "조건 불충족 시 뒤 단계로 진행하지 않음"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "검증 범위",
+      "items": [
+        "현재 소스 정적 확인 · 실차 검증 아님",
+        "파일·함수·줄 번호는 상세 설명과 연결"
+      ]
+    }
+  ]
+}

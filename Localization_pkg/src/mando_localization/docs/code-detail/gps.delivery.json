@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/gps.architecture.json",
+  "output": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/gps.html",
+  "specification": {
+    "sha256": "7774d84fea5dc8ce8dc650272a41fe541bd319a32efeb780bd3c13b10d8e44a3",
+    "bytes": 2650
+  },
+  "artifact": {
+    "sha256": "17d09cbe86a1f46ca4544e88057dcd3c598258977f5bbba5352bda1b8760866c",
+    "bytes": 801506
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

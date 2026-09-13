@@ -48,6 +48,13 @@ class OdometryGpsFusion {
     double z_m = 0.0;
   };
 
+  bool initialization_ready_is_fresh() const;
+  void initialization_ready_callback(const std_msgs::Bool::ConstPtr& message);
+  bool initialization_required_ = false;
+  bool initialization_ready_ = false;
+  ros::Time initialization_stamp_;
+  ros::SteadyTime initialization_receipt_;
+  ros::Subscriber initialization_subscriber_;
   void load_configuration();
   void gps_callback(const sensor_msgs::NavSatFix::ConstPtr& message);
   void process_fix(const sensor_msgs::NavSatFix::ConstPtr& message,

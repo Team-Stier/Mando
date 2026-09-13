@@ -1,0 +1,286 @@
+{
+  "workspace": "/home/stier/Mando_1-5/localization/src/mando_localization",
+  "basis": "current filesystem, not a Git revision",
+  "files": {
+    "src/imu_encoder_fusion/encoder_to_twist_adapter.cpp": "3916fe514ac36055b09c479562b281872fa2ca4cd1f0934d09347136d915177d",
+    "scripts/calibrated_imu_core.py": "0101364bffd11028e9205cc21a229d270e7ea5a16cd9d3d420cc0c34620a1370",
+    "src/odometry_gps_fusion/odometry_gps_fusion.cpp": "59e41777e51b7e826b22a87d33e6eca5d905a9670a9da38be89f0d58c0a87681",
+    "src/common/consecutive_recovery_gate.cpp": "7864167fd5927ba1c1f8d8ff4ad17048d69fd797ccb8547d3abd3da98c020a25",
+    "src/relocalization/relocalization_coordinator.cpp": "8db7ace5f05fc74ce7464c836a83c1dcee3d3ce13b0afaf81b681470ae8f0b29",
+    "src/relocalization/relocalization_policy.cpp": "e0b9961dc95f68a85fbd726136485ef42ecaf8f268acc3eee23d1eaa88df4540",
+    "src/status_manager/localization_state_evaluator.cpp": "39c0ac28eb3a7cf85d207cb7676bb4edf68676bd3b8de22177e23eb420b050c6",
+    "src/supervisor/localization_supervisor.cpp": "12c2d03c71af10ac1b5ddde97497841028d796b451df8b83e1be3abe8c01f826",
+    "src/output_gate/localization_output_gate.cpp": "f891c4f24c855444720f52eca3c2de38d886f51f1c1e632d43df0d884a1102fa",
+    "src/odometry_lidar_fusion/odometry_lidar_fusion.cpp": "9376779a39d421a60d88c349987c888bdd139bb3d58468761ff078cc61af9f7f",
+    "config/ekf_local.yaml": "9b510dbd0043063e84185b5023740c0b2ad58f69c81705e96aea10ebf0dd6fdd",
+    "config/ekf_global.yaml": "754e29c07d6d270a7a072dda7d6128a264a04fac271900e28ccf2d9e18bd3fe5",
+    "config/status_policy.yaml": "3be71b937abacda3d1af2e950c8b18642899b26594ba5d3f047f95c5f5768a66",
+    "config/relocalization_policy.yaml": "3679f6d71ffe686900ba270460630cc8e2bf5259293d4f4d5635d7aa0542b642",
+    "config/encoder_calibration.yaml": "364ade9bf63ddc63b5abfbb33de4078dc4d183edbc14e6a6c75eef0a0acc4715",
+    "config/gps_reference.yaml": "6fc6539bcff51ef43388bdbd8d5bd237e07fe4cea04e1370a40b8303af83ab27",
+    "config/imu_heading_calibration.yaml": "40b722d01ae321fff4c4262147d72c9de9598ad7d2ea1053c2eb0ed71a9aaa46",
+    "config/initial_heading.yaml": "ae247a7705d90e7e82f8f3abc14b15fea26e4661be862c7a5b016d749ac471fd",
+    "config/lidar_localization.yaml": "5791ff5ec2176ef4f98cfaa5138c80a9b71bb9146ff07744a5aa87457d56b410",
+    "config/time_sync.yaml": "6eefe4d5e8951a3f51ecaf9a29925cfd6c96094db0ea43aa9dd0063bd30ecca9",
+    "config/localization_interfaces.yaml": "f7c3321be2914a28a47f582150d0a5f4a609607ce27a16380c863179f6d56eca",
+    "launch/replay.launch": "fa99de3a57c1a21b772450e8d644091ca9aa7ff7cccd142e5d28f5acf2ef678e",
+    "launch/bringup.launch": "5e8c376c928294c6a70ba9285d7b0fad0bd42b698a4afa603d2a8391c1086cb8",
+    "src/status_manager/localization_status_manager.cpp": "956d3222e2cf71dc16ed4bb6f269b373357551608d165f47b1a4df3af841f582",
+    "src/common/localization_interface_adapter.cpp": "f1ac913cb1f72f00139a8be0588d49807bdc0a051f5c6266262e729b19c0786f",
+    "src/odometry_gps_fusion/local_odometry_history.hpp": "ba070dc8db4698f9c9fdfc788fcce52f9e318944424ef76b85af3f813619014f"
+  },
+  "references": [
+    [
+      "sensors",
+      "엔코더 수신",
+      "src/imu_encoder_fusion/encoder_to_twist_adapter.cpp",
+      185,
+      "bool EncoderToTwistAdapter::validate_measurement"
+    ],
+    [
+      "sensors",
+      "속도 변환",
+      "src/imu_encoder_fusion/encoder_to_twist_adapter.cpp",
+      236,
+      "EncoderToTwistAdapter::make_twist("
+    ],
+    [
+      "sensors",
+      "Twist 발행",
+      "src/imu_encoder_fusion/encoder_to_twist_adapter.cpp",
+      250,
+      "void EncoderToTwistAdapter::encoder_callback"
+    ],
+    [
+      "sensors",
+      "IMU 입력 검사",
+      "scripts/calibrated_imu_core.py",
+      267,
+      "    def observe_imu("
+    ],
+    [
+      "sensors",
+      "정지 yaw 제약",
+      "scripts/calibrated_imu_core.py",
+      141,
+      "    def apply("
+    ],
+    [
+      "sensors",
+      "주행 heading 보정",
+      "scripts/calibrated_imu_core.py",
+      323,
+      "    def observe_gnss("
+    ],
+    [
+      "gps",
+      "GPS 수신",
+      "src/odometry_gps_fusion/odometry_gps_fusion.cpp",
+      735,
+      "void OdometryGpsFusion::gps_callback("
+    ],
+    [
+      "gps",
+      "측정 시각 정합",
+      "src/odometry_gps_fusion/odometry_gps_fusion.cpp",
+      336,
+      "void OdometryGpsFusion::process_pending("
+    ],
+    [
+      "gps",
+      "map 후보 생성",
+      "src/odometry_gps_fusion/odometry_gps_fusion.cpp",
+      769,
+      "void OdometryGpsFusion::process_fix("
+    ],
+    [
+      "gps",
+      "innovation 검사",
+      "src/odometry_gps_fusion/odometry_gps_fusion.cpp",
+      463,
+      "bool OdometryGpsFusion::innovation_is_acceptable("
+    ],
+    [
+      "gps",
+      "연속 정상 후보",
+      "src/common/consecutive_recovery_gate.cpp",
+      14,
+      "bool ConsecutiveRecoveryGate::observeHealthy("
+    ],
+    [
+      "gps",
+      "gate pose 전달",
+      "src/relocalization/relocalization_coordinator.cpp",
+      250,
+      "void RelocalizationCoordinator::gpsGatePoseCallback("
+    ],
+    [
+      "recovery",
+      "장기 단절 감지",
+      "src/relocalization/relocalization_coordinator.cpp",
+      182,
+      "void RelocalizationCoordinator::gpsCandidateCallback("
+    ],
+    [
+      "recovery",
+      "복구 경로 선택",
+      "src/relocalization/relocalization_policy.cpp",
+      20,
+      "RelocalizationDecision RelocalizationPolicy::evaluate("
+    ],
+    [
+      "recovery",
+      "GPS-only 조건부 reset",
+      "src/relocalization/relocalization_coordinator.cpp",
+      479,
+      "bool RelocalizationCoordinator::requestGpsOnlyReset("
+    ],
+    [
+      "recovery",
+      "gate reanchor 요청",
+      "src/relocalization/relocalization_coordinator.cpp",
+      512,
+      "void RelocalizationCoordinator::requestGateReanchor("
+    ],
+    [
+      "recovery",
+      "ACK 일치 검사",
+      "src/relocalization/relocalization_coordinator.cpp",
+      338,
+      "void RelocalizationCoordinator::reanchorAcceptedCallback("
+    ],
+    [
+      "recovery",
+      "대기 시간 초과",
+      "src/relocalization/relocalization_coordinator.cpp",
+      367,
+      "void RelocalizationCoordinator::timerCallback("
+    ],
+    [
+      "state",
+      "Local motion 검사",
+      "src/status_manager/localization_state_evaluator.cpp",
+      18,
+      "StateDecision LocalizationStateEvaluator::evaluate("
+    ],
+    [
+      "state",
+      "재정합 검사",
+      "src/status_manager/localization_state_evaluator.cpp",
+      26,
+      "  if (input.relocalizing)"
+    ],
+    [
+      "state",
+      "Global 출력 검사",
+      "src/status_manager/localization_state_evaluator.cpp",
+      30,
+      "  if (!input.global_output_healthy)"
+    ],
+    [
+      "state",
+      "절대 소스 검사",
+      "src/status_manager/localization_state_evaluator.cpp",
+      37,
+      "  if (input.absolute_healthy_count >"
+    ],
+    [
+      "state",
+      "anchor와 DR 예산",
+      "src/status_manager/localization_state_evaluator.cpp",
+      44,
+      "  if (!input.anchor_seen"
+    ],
+    [
+      "state",
+      "Supervisor 최종 중재",
+      "src/supervisor/localization_supervisor.cpp",
+      33,
+      "SupervisorDecision LocalizationSupervisorArbiter::evaluate("
+    ],
+    [
+      "output",
+      "Global Odom 수신",
+      "src/output_gate/localization_output_gate.cpp",
+      131,
+      "void LocalizationOutputGate::odometryCallback("
+    ],
+    [
+      "output",
+      "valid 확인",
+      "src/output_gate/localization_output_gate.cpp",
+      134,
+      "  if (!valid_ || valid_receipt_time_.isZero()"
+    ],
+    [
+      "output",
+      "frame와 시각",
+      "src/output_gate/localization_output_gate.cpp",
+      89,
+      "  if (message.header.stamp.isZero()"
+    ],
+    [
+      "output",
+      "pose 검사",
+      "src/output_gate/localization_output_gate.cpp",
+      103,
+      "  if (!MessageValidation::normalizeQuaternion("
+    ],
+    [
+      "output",
+      "Twist 검사",
+      "src/output_gate/localization_output_gate.cpp",
+      116,
+      "  const geometry_msgs::Twist& twist ="
+    ],
+    [
+      "output",
+      "최종 Odometry 발행",
+      "src/output_gate/localization_output_gate.cpp",
+      147,
+      "  output_publisher_.publish(message);"
+    ],
+    [
+      "fusion",
+      "LaserScan 검사",
+      "src/odometry_lidar_fusion/odometry_lidar_fusion.cpp",
+      361,
+      "void OdometryLidarFusion::scan_callback("
+    ],
+    [
+      "fusion",
+      "AMCL pose 검사",
+      "src/odometry_lidar_fusion/odometry_lidar_fusion.cpp",
+      377,
+      "void OdometryLidarFusion::amcl_pose_callback("
+    ],
+    [
+      "fusion",
+      "연속 안정 pose",
+      "src/odometry_lidar_fusion/odometry_lidar_fusion.cpp",
+      321,
+      "bool OdometryLidarFusion::accept_pose_candidate("
+    ],
+    [
+      "fusion",
+      "Local EKF",
+      "config/ekf_local.yaml",
+      19,
+      "world_frame: odom"
+    ],
+    [
+      "fusion",
+      "Global EKF",
+      "config/ekf_global.yaml",
+      24,
+      "world_frame: map"
+    ],
+    [
+      "fusion",
+      "지연 측정 재처리",
+      "config/ekf_global.yaml",
+      15,
+      "smooth_lagged_data: true"
+    ]
+  ]
+}

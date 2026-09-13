@@ -1,4 +1,6 @@
 <launch>
+  <arg name="start_rddf_initialization" default="false"/>
+  <arg name="rddf_initialization_config" default="$(find mando_localization)/config/rddf_initialization.yaml"/>
   <arg name="interfaces_config" default="$(find mando_localization)/config/localization_interfaces.yaml"/>
   <arg name="status_policy_config" default="$(find mando_localization)/config/status_policy.yaml"/>
   <arg name="relocalization_policy_config" default="$(find mando_localization)/config/relocalization_policy.yaml"/>
@@ -35,6 +37,7 @@
           name="$(arg supervisor_node_name)" output="screen" clear_params="true">
       <rosparam command="load" file="$(arg interfaces_config)"/>
       <rosparam command="load" file="$(arg status_policy_config)"/>
+      <param name="initialization/required" value="$(arg start_rddf_initialization)"/>
       <rosparam command="load" file="$(arg relocalization_policy_config)"/>
       <rosparam command="load" file="$(arg gps_reference_config)"/>
       <param name="absolute_sources/gps_enabled" value="$(arg enable_gps_fusion)"/>
@@ -49,6 +52,7 @@
           name="$(arg output_gate_node_name)" output="screen" clear_params="true">
       <rosparam command="load" file="$(arg interfaces_config)"/>
       <rosparam command="load" file="$(arg status_policy_config)"/>
+      <param name="initialization/required" value="$(arg start_rddf_initialization)"/>
     </node>
   </group>
 </launch>

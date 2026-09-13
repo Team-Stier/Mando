@@ -27,6 +27,8 @@ add_message_files(
     GpsGateReanchor.msg
 )
 
+add_service_files(FILES SetInitialHeading.srv)
+
 generate_messages(
   DEPENDENCIES
     geometry_msgs
@@ -222,6 +224,8 @@ install(DIRECTORY config docs launch maps udev
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 catkin_install_python(PROGRAMS
+  scripts/rddf_initialization_core.py
+  scripts/rddf_initializer_node.py
   scripts/calibrated_imu_core.py
   scripts/calibrated_imu_node.py
   scripts/timing_core.py
@@ -239,6 +243,9 @@ install(PROGRAMS
 
 if(CATKIN_ENABLE_TESTING)
   find_package(rostest REQUIRED)
+  add_rostest(test/startup_gate.test)
+  add_rostest(test/rddf_initialization.test)
+  add_rostest(test/rddf_initialization_manual.test)
   catkin_add_gtest(test_state_evaluator
     test/gtest_main.cpp
     test/test_state_evaluator.cpp
@@ -362,8 +369,11 @@ if(CATKIN_ENABLE_TESTING)
                  encoder_to_twist_adapter_node static_transform_publisher_node
   )
 
+  catkin_add_nosetests(test/test_localization_viewer_initialization.py)
   catkin_add_nosetests(test/test_localization_viewer.py)
   catkin_add_nosetests(test/test_configuration.py)
+  catkin_add_nosetests(test/test_rddf_initialization_core.py)
+  catkin_add_nosetests(test/test_rddf_heading.py)
   catkin_add_nosetests(test/test_calibrated_imu.py)
   catkin_add_nosetests(test/test_encoder_yaw_hold.py)
   catkin_add_nosetests(test/test_sensor_timing.py)

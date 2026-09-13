@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "05 최종 출력 승인과 차단",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1160,
+      650
+    ]
+  },
+  "components": [
+    {
+      "id": "output0",
+      "type": "backend",
+      "label": "Global Odom 수신",
+      "sublabel": "EKF 추정 출력",
+      "pos": [
+        60,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "output1",
+      "type": "security",
+      "label": "valid 확인",
+      "sublabel": "true + 0.50초 이내",
+      "pos": [
+        455,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "output2",
+      "type": "security",
+      "label": "frame와 시각",
+      "sublabel": "map → base_link",
+      "pos": [
+        850,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "output3",
+      "type": "security",
+      "label": "pose 검사",
+      "sublabel": "quaternion · covariance",
+      "pos": [
+        850,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "output4",
+      "type": "security",
+      "label": "Twist 검사",
+      "sublabel": "공분산 + 6축 유한성",
+      "pos": [
+        455,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "output5",
+      "type": "backend",
+      "label": "최종 Odometry 발행",
+      "sublabel": "원본 메시지 전달",
+      "pos": [
+        60,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "outputedge0",
+      "from": "output0",
+      "to": "output1",
+      "label": "다음 처리"
+    },
+    {
+      "id": "outputedge1",
+      "from": "output1",
+      "to": "output2",
+      "label": "다음 처리"
+    },
+    {
+      "id": "outputedge2",
+      "from": "output2",
+      "to": "output3",
+      "label": "다음 처리",
+      "labelAt": [
+        975,
+        280
+      ]
+    },
+    {
+      "id": "outputedge3",
+      "from": "output3",
+      "to": "output4",
+      "label": "다음 처리"
+    },
+    {
+      "id": "outputedge4",
+      "from": "output4",
+      "to": "output5",
+      "label": "다음 처리"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "처리 기준",
+      "items": [
+        "조건 불충족 시 뒤 단계로 진행하지 않음"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "검증 범위",
+      "items": [
+        "현재 소스 정적 확인 · 실차 검증 아님",
+        "파일·함수·줄 번호는 상세 설명과 연결"
+      ]
+    }
+  ]
+}

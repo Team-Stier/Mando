@@ -245,6 +245,17 @@ class HeadingCalibration:
         self.reason = 'RDDF_INITIALIZED'
         return True
 
+    def select_initial_heading(self, yaw_rad, source, now, mount, standard_deviation_deg=10.):
+        """RDDF 선택 후 최신 유효 IMU와 한 번 정합한다. 이동 중 재보정 API가 아니다."""
+        if self.initialized or self.calibrated:
+            return False
+        if (not math.isfinite(yaw_rad) or not math.isfinite(standard_deviation_deg) or
+                not 0 < standard_deviation_deg <= 180 or not source or not self.imus or
+                not 0 <= now-self.imus[-1][0] <= self.p['max_imu_age_sec']):
+            return False
+        self.initial_heading = dict(yaw_rad=wrap(yaw_rad), standard_deviation_deg=standard_deviation_deg, source=source)
+        return self.initialize_heading(mount)
+
     def observe_time(self, now):
         """ROS clock rollback starts a new bag/session; reordered sensors do not reset it."""
         if not math.isfinite(now) or now <= 0:

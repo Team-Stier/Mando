@@ -20,6 +20,7 @@ from geometry_msgs.msg import TwistWithCovarianceStamped
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Bool
 from ublox_msgs.msg import NavPVT
+from mando_localization.srv import SetInitialHeading, SetInitialHeadingResponse
 
 
 class CalibratedIMU:
@@ -27,6 +28,10 @@ class CalibratedIMU:
         self.core = HeadingCalibration(rospy.get_param('~imu_heading_calibration'),
                                        rospy.get_param('~initial_heading', None),
                                        rospy.get_param('~encoder_yaw_hold'))
+        self.wait_for_rddf = rospy.get_param("~initialization/required", False)
+        if self.wait_for_rddf:
+            self.core.initial_heading = None
+        self.heading_transaction = None
         self.p = self.core.p
         self.topics = rospy.get_param('~topics')
         self.frames = rospy.get_param('~frames')
@@ -60,6 +65,7 @@ class CalibratedIMU:
             rospy.Subscriber(rospy.get_param('~internal_topics/clock_ready'), Bool,
                              self.clock_callback, queue_size=5),
         ]
+        self.heading_service = rospy.Service("~set_initial_heading", SetInitialHeading, self.set_initial_heading)
         self.timer = rospy.Timer(rospy.Duration(0.2), self.timer_callback, reset=True)
         rospy.loginfo('CalibratedIMU: %s -> %s; direction_mode=%s, one_shot=%s',
                       self.topics['imu_normalized'], self.topics['imu_calibrated'],
@@ -72,10 +78,32 @@ class CalibratedIMU:
             rospy.logwarn('Initial yaw alignment assumes forward straight motion until calibrated; '
                           'Gear is not a verified direction signal.')
 
+    def set_initial_heading(self, request):
+        with self.lock:
+            now = self._time()
+            signature = (request.transaction_id, request.yaw_rad, request.source, request.standard_deviation_deg)
+            if not self.wait_for_rddf or request.transaction_id == 0:
+                return SetInitialHeadingResponse(False, 'DYNAMIC_INITIALIZATION_DISABLED', rospy.Time())
+            if self.heading_transaction is not None:
+                okay = signature == self.heading_transaction and self.core.initialized
+                return SetInitialHeadingResponse(okay, 'ALREADY_INITIALIZED',
+                    rospy.Time.from_sec(self.core.initialization_stamp or 0.))
+            if (self.last_imu_mono is None or time.monotonic()-self.last_imu_mono > self.p["max_imu_age_sec"]):
+                return SetInitialHeadingResponse(False, "WAITING_FOR_FRESH_IMU", rospy.Time())
+            if not self._mount() or not self.core.select_initial_heading(
+                    request.yaw_rad, request.source, now, self.mount, request.standard_deviation_deg):
+                return SetInitialHeadingResponse(False, 'WAITING_FOR_FRESH_IMU', rospy.Time())
+            self.heading_transaction = signature
+            return SetInitialHeadingResponse(True, 'RDDF_INITIALIZED',
+                rospy.Time.from_sec(self.core.initialization_stamp))
+
     def _time(self):
         now = rospy.Time.now().to_sec()
         if self.last_now is not None and now < self.last_now-1e-6:
             self.pending.clear()
+            self.heading_transaction = None
+            if self.wait_for_rddf:
+                self.core.initial_heading = None
             self.clock_value = False
             self.clock_receipt = None
             self.clock_mono = None
@@ -145,6 +173,9 @@ class CalibratedIMU:
                 self.rejected_imu += 1
                 return
             self.last_imu_mono = time.monotonic()
+            if self.wait_for_rddf and self.heading_transaction is None:
+                self.core.reason = "WAITING_FOR_RDDF_POSITION"
+                return
             if self.core.initial_heading is not None and not self.core.initialized:
                 if not self._mount() or not self.core.initialize_heading(self.mount):
                     return
@@ -164,6 +195,8 @@ class CalibratedIMU:
     def gnss_callback(self, message):
         with self.lock:
             now = self._time()
+            if self.wait_for_rddf and self.heading_transaction is None:
+                return
             if self.core.calibrated and self.p['one_shot']:
                 return
             try:

@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "01 센서 처리와 IMU 보정",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1160,
+      650
+    ]
+  },
+  "components": [
+    {
+      "id": "sensors0",
+      "type": "backend",
+      "label": "엔코더 수신",
+      "sublabel": "SerialFeedBack",
+      "pos": [
+        60,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "sensors1",
+      "type": "security",
+      "label": "속도 변환",
+      "sublabel": "vx = speed × scale × sign",
+      "pos": [
+        455,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "sensors2",
+      "type": "security",
+      "label": "Twist 발행",
+      "sublabel": "base_link · PC 수신 시각",
+      "pos": [
+        850,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "sensors3",
+      "type": "security",
+      "label": "IMU 입력 검사",
+      "sublabel": "시각 · quaternion · gyro",
+      "pos": [
+        850,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "sensors4",
+      "type": "security",
+      "label": "정지 yaw 제약",
+      "sublabel": "encoder=0 AND speed=0",
+      "pos": [
+        455,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "sensors5",
+      "type": "backend",
+      "label": "주행 heading 보정",
+      "sublabel": "GNSS · IMU · 속도 정합",
+      "pos": [
+        60,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "sensorsedge0",
+      "from": "sensors0",
+      "to": "sensors1",
+      "label": "검사 통과"
+    },
+    {
+      "id": "sensorsedge1",
+      "from": "sensors1",
+      "to": "sensors2",
+      "label": "변환"
+    },
+    {
+      "id": "sensorsedge2",
+      "from": "sensors3",
+      "to": "sensors4",
+      "label": "유효 IMU"
+    },
+    {
+      "id": "sensorsedge3",
+      "from": "sensors4",
+      "to": "sensors5",
+      "label": "보정 판단"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "처리 기준",
+      "items": [
+        "조건 불충족 시 뒤 단계로 진행하지 않음"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "검증 범위",
+      "items": [
+        "현재 소스 정적 확인 · 실차 검증 아님",
+        "파일·함수·줄 번호는 상세 설명과 연결"
+      ]
+    }
+  ]
+}

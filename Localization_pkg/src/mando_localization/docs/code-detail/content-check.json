@@ -1,0 +1,7 @@
+{
+  "passed": true,
+  "links_checked": 4987,
+  "source_files_checked": 26,
+  "code_references": 36,
+  "scope": "static documentation only; no catkin or runtime test"
+}

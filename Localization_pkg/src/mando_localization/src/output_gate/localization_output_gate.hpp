@@ -33,15 +33,23 @@ class LocalizationOutputGate {
 
  private:
   void validCallback(const std_msgs::BoolConstPtr& message);
+  void initializationReadyCallback(const std_msgs::BoolConstPtr& message);
+  bool initializationReady(const ros::Time& now) const;
   void odometryCallback(const nav_msgs::OdometryConstPtr& message);
 
   ros::NodeHandle nh_;
   ros::NodeHandle private_nh_;
   ros::Subscriber valid_subscriber_;
   ros::Subscriber odometry_subscriber_;
+  ros::Subscriber initialization_ready_subscriber_;
   ros::Publisher output_publisher_;
 
   bool valid_{false};
+  bool initialization_required_{false};
+  bool initialization_ready_{false};
+  double initialization_ready_timeout_sec_{0.5};
+  ros::Time initialization_ready_receipt_time_;
+  ros::WallTime initialization_ready_wall_time_;
   ros::Time valid_receipt_time_;
   std::string map_frame_;
   std::string base_frame_;

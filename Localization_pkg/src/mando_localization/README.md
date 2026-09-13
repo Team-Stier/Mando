@@ -1,5 +1,7 @@
 # mando_localization
 
+
+현재 기본 시작 동작은 [GPS/RViz 기반 RDDF 초기화](docs/rddf_startup.md)입니다. 코스 중간에서도 실제 차량을 RDDF 중심선·진행 방향에 놓고 실행합니다.
 `mando_localization`은 ROS1 Noetic 차량에서 IMU·엔코더의 연속 움직임과 GPS·2D LiDAR의 절대 위치를 두 단계 EKF로 결합하는 패키지입니다. 상태 판단과 최종 위치 출력을 분리하고, 입력이 오래되거나 계약을 위반하면 공개 Odometry를 차단하는 fail-closed 구조입니다.
 
 자세한 내용은 [문서 목차](docs/README.md), [아키텍처](docs/architecture.md),

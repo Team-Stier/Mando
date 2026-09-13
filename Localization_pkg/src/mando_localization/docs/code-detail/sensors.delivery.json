@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/sensors.architecture.json",
+  "output": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/sensors.html",
+  "specification": {
+    "sha256": "efe96b41c43dccc185b346b7e555d4bd479b61c8e3b52f565fecb04c50a9f361",
+    "bytes": 2563
+  },
+  "artifact": {
+    "sha256": "f9677a14e52aa64507685b94b60c56e79bec822ea5d7f319ec088b13e5c922e3",
+    "bytes": 801018
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

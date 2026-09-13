@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "02 GPS 시간 정합과 승인",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1160,
+      650
+    ]
+  },
+  "components": [
+    {
+      "id": "gps0",
+      "type": "backend",
+      "label": "GPS 수신",
+      "sublabel": "NavSatFix 검사",
+      "pos": [
+        60,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "gps1",
+      "type": "security",
+      "label": "측정 시각 정합",
+      "sublabel": "Local 이력 보간",
+      "pos": [
+        455,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "gps2",
+      "type": "security",
+      "label": "map 후보 생성",
+      "sublabel": "datum · 레버암",
+      "pos": [
+        850,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "gps3",
+      "type": "security",
+      "label": "innovation 검사",
+      "sublabel": "Local 증분으로 예측",
+      "pos": [
+        850,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "gps4",
+      "type": "security",
+      "label": "연속 정상 후보",
+      "sublabel": "최초·단기 복구 3회",
+      "pos": [
+        455,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "gps5",
+      "type": "backend",
+      "label": "gate pose 전달",
+      "sublabel": "Coordinator 승인 경로",
+      "pos": [
+        60,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "gpsedge0",
+      "from": "gps0",
+      "to": "gps1",
+      "label": "다음 처리"
+    },
+    {
+      "id": "gpsedge1",
+      "from": "gps1",
+      "to": "gps2",
+      "label": "다음 처리"
+    },
+    {
+      "id": "gpsedge2",
+      "from": "gps2",
+      "to": "gps3",
+      "label": "다음 처리",
+      "labelAt": [
+        975,
+        280
+      ]
+    },
+    {
+      "id": "gpsedge3",
+      "from": "gps3",
+      "to": "gps4",
+      "label": "다음 처리"
+    },
+    {
+      "id": "gpsedge4",
+      "from": "gps4",
+      "to": "gps5",
+      "label": "다음 처리"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "처리 기준",
+      "items": [
+        "조건 불충족 시 뒤 단계로 진행하지 않음"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "검증 범위",
+      "items": [
+        "현재 소스 정적 확인 · 실차 검증 아님",
+        "파일·함수·줄 번호는 상세 설명과 연결"
+      ]
+    }
+  ]
+}

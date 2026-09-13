@@ -80,6 +80,7 @@ fi
 echo "[localization] Mando 실센서 + Localization + RViz 시작"
 echo "[localization] AMCL: OFF / rosbag record: OFF / 종료: Ctrl+C"
 echo "[localization] 공통 RViz: Local 초록 / Global 빨강 / GPS 보라 / RDDF 파랑 / ±10초 화면 탐색"
+echo "[localization] GPS로 RDDF 시작 위치 선택 / GPS가 없으면 RViz 시작 위치 선택 → 미리보기 → 클릭"
 exec roslaunch mando_localization map_data_collection.launch \
   start_encoder_driver:="${ENCODER_ARG}" \
   start_imu_driver:="${IMU_ARG}" \

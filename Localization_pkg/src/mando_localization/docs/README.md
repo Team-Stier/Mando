@@ -5,6 +5,8 @@
 
 | 문서 | 담당 내용 |
 |---|---|
+| [코드 상세 설명과 Archify 그림](code-detail/index.html) | 처리·실패·상태 전이 6개 상세도, 36개 코드 위치와 소스 해시 |
+| [RDDF 시작 위치 선택](rddf_startup.md) | GPS 자동 선택, RViz hover/click, IMU·EKF 초기화와 안전 경계 |
 | [아키텍처](architecture.md) | 현재 실행 노드, 데이터 흐름, TF와 출력 소유권 |
 | [설정 가이드](configuration.md) | 설정 파일의 역할, 실행 모드와 변경 방법 |
 | [TF 프레임](tf_frames.md) | 차량 기준점, 장착값, TF 검증 |
