@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Mando Localization 상태 라이프사이클",
+    "output": "localization-state-lifecycle.html",
+    "quality_profile": "showcase",
+    "viewBox": [1080, 650]
+  },
+  "lanes": [
+    { "id": "main", "label": "Localization 상태" },
+    { "id": "recovery", "label": "재정합" },
+    { "id": "terminal", "label": "Fail-closed" }
+  ],
+  "states": [
+    { "id": "initializing", "type": "start", "label": "INITIALIZING", "sublabel": "입력 대기", "lane": "main", "col": 0, "tag": "valid=false" },
+    { "id": "tracking", "type": "success", "label": "TRACKING", "sublabel": "절대 센서 정상", "lane": "main", "col": 1, "tag": "valid=true" },
+    { "id": "degraded", "type": "waiting", "label": "DEGRADED", "sublabel": "일부 센서 불량", "lane": "main", "col": 2, "tag": "valid=true" },
+    { "id": "deadReckoning", "type": "active", "label": "DEAD_RECKONING", "sublabel": "제한 dead reckoning", "lane": "main", "col": 3, "tag": "valid=true" },
+    { "id": "relocalizing", "type": "decision", "label": "RELOCALIZING", "sublabel": "재정합 진행", "lane": "recovery", "col": 0, "tag": "valid=false" },
+    { "id": "fault", "type": "failure", "label": "FAULT", "sublabel": "Odometry 차단", "lane": "terminal", "col": 1, "tag": "valid=false" }
+  ],
+  "transitions": [
+    { "id": "degraded-relocalize", "from": "degraded", "to": "relocalizing", "label": "recovery coordinator active", "variant": "security", "route": "straight", "fromSide": "bottom", "toSide": "top", "labelAt": [402, 202] },
+    { "id": "dr-fault", "from": "deadReckoning", "to": "fault", "label": "2초 또는 10m 예산 초과", "variant": "security", "route": "straight", "fromSide": "bottom", "toSide": "top", "labelAt": [556, 202] },
+    { "id": "relocalize-fault", "from": "relocalizing", "to": "fault", "label": "복구 확인 실패", "variant": "security" }
+  ]
+}

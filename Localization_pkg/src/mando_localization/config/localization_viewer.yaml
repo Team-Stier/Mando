@@ -32,3 +32,6 @@ colors:
   - 0.25
   - 0.5
   - 1.0
+
+# 시작 위치 선택 모드에서 허용할 RDDF 스냅 거리 [m].
+manual_snap_distance_m: 5.0

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Single RViz viewer for live localization and explicitly selected recorded outputs.
 
-Display-only common XY translation; no per-stream yaw reset, no estimator input.
+Recorded outputs use a display-only common XY translation. Live RDDF-map mode
+also offers an explicit startup-pose request; hovering never changes estimation.
 Time navigation redraws buffered results and never rewinds ROS /clock.
 """
 import argparse
@@ -29,6 +30,42 @@ PREFIX = '/mando_localization/visualization/debug'
 DEFAULT_CONFIG = yaml.safe_load((PACKAGE/'config/localization_viewer.yaml').read_text())
 TOPICS = dict(DEFAULT_CONFIG['topics'])
 COLORS = {key:tuple(value) for key,value in DEFAULT_CONFIG['colors'].items()}
+INITIALIZATION_PREFIX = '/mando_localization/internal/initialization'
+
+
+def topdown_screen_to_map(x, y, width, height, scale, center_x, center_y,
+                          angle=0., pixel_ratio=1.):
+    """Invert RViz TopDownOrtho projection, including native-pixel dimensions.
+
+    RViz RenderWidget rounds its native render-window width up to an even pixel.
+    The view controller's Scale is native pixels per metre, and Angle rotates
+    camera +X/+Y about map +Z. Qt event coordinates remain logical pixels.
+    """
+    values = [x, y, width, height, scale, center_x, center_y, angle, pixel_ratio]
+    if not all(math.isfinite(float(value)) for value in values):
+        raise ValueError('non-finite RViz projection')
+    if width <= 0 or height <= 0 or scale <= 0 or pixel_ratio <= 0:
+        raise ValueError('invalid RViz projection dimensions')
+    native_width = int(width * pixel_ratio)
+    native_width += native_width % 2
+    native_height = int(height * pixel_ratio)
+    dx = (x * pixel_ratio - native_width / 2.) / scale
+    dy = (native_height / 2. - y * pixel_ratio) / scale
+    c, s = math.cos(angle), math.sin(angle)
+    return center_x + c * dx - s * dy, center_y + s * dx + c * dy
+
+
+def manual_initialization_request(match, stamp):
+    """One atomic route/position request; coordinator repeats all admission checks."""
+    if not match or not match.get('accepted') or not math.isfinite(stamp) or stamp <= 0:
+        raise ValueError('manual initialization requires an accepted pose and valid ROS time')
+    result = dict(frame_id='map', stamp=float(stamp), route=match['route'])
+    for key in ('x', 'y', 'yaw'):
+        value = float(match[key])
+        if not math.isfinite(value):
+            raise ValueError('non-finite manual pose')
+        result[key] = value
+    return result
 
 
 def load_rddf(rddf_dir: Path) -> Tuple[Dict[str, np.ndarray], Dict]:
@@ -143,25 +180,32 @@ def decode_sample(key, message, project):
 
 class SceneData:
     """Same decoding, anchor, ordering and retention rules for files and live input."""
-    def __init__(self, rddf_dir, source_start=None, duration=0., processed_bag=None, limit=200000):
+    def __init__(self, rddf_dir, source_start=None, duration=0., processed_bag=None,
+                 limit=200000, frame_mode='first_gps_translation'):
         self.routes, self.project = load_rddf(Path(rddf_dir))
+        self.rddf_dir = Path(rddf_dir)
+        if frame_mode not in ('first_gps_translation', 'rddf_map'):
+            raise ValueError('unknown viewer frame_mode: ' + str(frame_mode))
+        self.frame_mode = frame_mode
         self.start, self.duration, self.limit = source_start, duration, limit
         self.data = {key: [] for key in TOPICS}
         self.times = {key: [] for key in TOPICS}
         self.mount = None
-        self.shift = None
+        self.shift = np.zeros(2) if frame_mode == 'rddf_map' else None
         self.first_local = self.first_gps = None
         self.summary = {'processed_bag': str(processed_bag) if processed_bag else None,
-                        'common_xy_translation_m': None, 'additional_viewer_yaw_rotation_rad': 0.,
+                        'common_xy_translation_m': self.shift.tolist() if self.shift is not None else None,
+                        'frame_mode': frame_mode, 'additional_viewer_yaw_rotation_rad': 0.,
                         'skipped': 0, 'buffer_dropped': 0, 'clock_resets': 0}
         self.last_receipt = None
 
     def reset(self, stamp):
         for key in TOPICS:
             self.data[key].clear(); self.times[key].clear()
-        self.first_local = self.first_gps = self.shift = None
+        self.first_local = self.first_gps = None
+        self.shift = np.zeros(2) if self.frame_mode == 'rddf_map' else None
         self.start, self.duration = stamp, 0.
-        self.summary['common_xy_translation_m'] = None
+        self.summary['common_xy_translation_m'] = self.shift.tolist() if self.shift is not None else None
         self.summary['clock_resets'] += 1
 
     def ingest(self, key, message, stamp, live=False):
@@ -212,12 +256,12 @@ class SceneData:
         return values
 
 
-def load_data(processed_bag, source_bag, rddf_dir, limit):
+def load_data(processed_bag, source_bag, rddf_dir, limit, frame_mode='first_gps_translation'):
     processed_bag = final_bag(processed_bag)
     source_bag = final_bag(source_bag) if source_bag else processed_bag
     with rosbag.Bag(str(source_bag)) as bag:
         start, end = bag.get_start_time(), bag.get_end_time()
-    model = SceneData(rddf_dir, start, end-start, processed_bag, limit)
+    model = SceneData(rddf_dir, start, end-start, processed_bag, limit, frame_mode)
     reverse = {value: key for key,value in TOPICS.items()}
     with rosbag.Bag(str(processed_bag)) as bag:
         for topic,message,stamp in bag.read_messages(topics=list(reverse)+['/tf_static']):
@@ -257,6 +301,7 @@ def run_gui(model, seek, live=False, config=None):
     class Viewer(QtWidgets.QWidget):
         seek_signal = QtCore.Signal(float)
         follow_signal = QtCore.Signal(bool)
+        initialization_signal = QtCore.Signal(str)
 
         def __init__(self):
             super().__init__()
@@ -266,12 +311,31 @@ def run_gui(model, seek, live=False, config=None):
             self.follow_live = live
             self.inbox = queue.Queue(maxsize=10000)
             self.input_dropped = 0
+            self.initialization = {}
+            self.selection_active = False
+            self.preview = None
+            self.selection_message = ''
+            self.route_map = None
+            self.manual_enabled = live and model.frame_mode == 'rddf_map'
+            self.manual_snap_distance = float(config.get('manual_snap_distance_m', 5.0))
+            if not math.isfinite(self.manual_snap_distance) or self.manual_snap_distance <= 0:
+                raise ValueError('manual_snap_distance_m must be finite and positive')
+            if self.manual_enabled:
+                from rddf_initialization_core import RddfRouteMap
+                self.route_map = RddfRouteMap(model.rddf_dir)
             self.position = self.duration if seek is None else max(0.0, min(self.duration, seek))
             self.playing, self.last, self.rate, self.drag_play = False, time.monotonic(), 1.0, False
             rospy.init_node('mando_localization_rviz', disable_signals=True)
             self.scene = rospy.Publisher(PREFIX+'/scene', MarkerArray, queue_size=1, latch=True)
             self.status = rospy.Publisher(PREFIX+'/status', String, queue_size=1, latch=True)
             self.tf = rospy.Publisher('/tf_static', TFMessage, queue_size=1, latch=True)
+            if self.manual_enabled:
+                self.manual_request = rospy.Publisher(INITIALIZATION_PREFIX+'/manual_request', String,
+                                                      queue_size=1, latch=False)
+                self.manual_active = rospy.Publisher(INITIALIZATION_PREFIX+'/manual_active', Bool,
+                                                     queue_size=1, latch=True)
+                self.manual_active.publish(Bool(False))
+                self.initialization_signal.connect(self.initialization_changed)
             transform = TransformStamped()
             transform.header.frame_id, transform.child_frame_id = FRAME+'_world', FRAME
             transform.transform.rotation.w = 1
@@ -286,13 +350,43 @@ def run_gui(model, seek, live=False, config=None):
             heading = QtWidgets.QLabel('RDDF 공통 뷰어  |  초록 Local · 빨강 Global · 보라 Raw GPS · 파랑 RDDF')
             heading.setStyleSheet('font-size:16px;font-weight:bold;padding:6px')
             layout.addWidget(heading)
+            if self.manual_enabled:
+                selection = QtWidgets.QHBoxLayout()
+                self.select_button = QtWidgets.QPushButton('시작 위치 선택')
+                self.select_button.setObjectName('initialization_select_button')
+                self.select_button.setCheckable(True)
+                self.select_button.setEnabled(False)
+                self.select_button.setMinimumHeight(37)
+                self.select_button.toggled.connect(self.set_selection_active)
+                selection.addWidget(self.select_button)
+                selection.addWidget(QtWidgets.QLabel('진행 경로'))
+                self.route_choice = QtWidgets.QComboBox()
+                self.route_choice.setObjectName('initialization_route_choice')
+                self.route_choice.addItem('자동 (가까운 RDDF)', '')
+                for name in sorted(self.route_map.routes):
+                    self.route_choice.addItem(name, name)
+                self.route_choice.currentIndexChanged.connect(self.route_changed)
+                self.route_choice.setEnabled(False)
+                selection.addWidget(self.route_choice)
+                self.initialization_label = QtWidgets.QLabel('초기화 노드 상태 대기')
+                self.initialization_label.setWordWrap(True)
+                selection.addWidget(self.initialization_label, 1)
+                layout.addLayout(selection)
             self.frame = rviz.VisualizationFrame()
             self.frame.setSplashPath('')
             self.frame.initialize()
-            self.frame.setMenuBar(None)
-            self.frame.setStatusBar(None)
+            # RViz retains panel-menu QAction pointers until frame destruction.
+            # Hiding bars preserves those owners and avoids shutdown use-after-free.
+            self.frame.menuBar().hide()
+            self.frame.statusBar().hide()
             layout.addWidget(self.frame, 1)
             manager = self.frame.getManager()
+            # Startup position goes through the explicit RDDF admission path.
+            # Default RViz pose/goal tools must not publish during bag browsing.
+            tools = manager.getToolManager()
+            for index in reversed(range(tools.numTools())):
+                if tools.getTool(index).getClassId() in ('rviz/SetInitialPose', 'rviz/SetGoal', 'rviz/PublishPoint'):
+                    tools.removeTool(index)
             manager.setFixedFrame(FRAME)
             manager.removeAllDisplays()
             display = manager.createDisplay('rviz/MarkerArray', '기록 시점 장면', True)
@@ -304,6 +398,17 @@ def run_gui(model, seek, live=False, config=None):
             view.setCurrentViewControllerType('rviz/TopDownOrtho')
             self.view = view.getCurrent()
             self.view.subProp('Angle').setValue(0.0)
+            # RenderPanel is not exported in Noetic's Python SIP bindings. Its
+            # QWidget wrapper still exposes the Qt metaobject and mouse events.
+            panels = [widget for widget in self.frame.centralWidget().findChildren(QtWidgets.QWidget)
+                      if widget.metaObject().className() == 'rviz::RenderPanel']
+            if len(panels) != 1:
+                raise RuntimeError('cannot identify RViz RenderPanel for map coordinates')
+            self.render_panel = panels[0]
+            self.render_panel.setObjectName('initialization_rviz_render_panel')
+            if self.manual_enabled:
+                self.render_panel.setMouseTracking(True)
+                self.render_panel.installEventFilter(self)
             self.info = QtWidgets.QLabel()
             self.info.setStyleSheet('font-size:14px;padding:5px')
             self.info.setWordWrap(True)
@@ -344,7 +449,10 @@ def run_gui(model, seek, live=False, config=None):
             button('이동', self.jump_time)
             self.clock_label = QtWidgets.QLabel()
             controls.addWidget(self.clock_label)
-            note = QtWidgets.QLabel('Space 재생/정지 · ←/→ 10초 · Local/Global 동일 XY 이동 · yaw 회전 없음 · 시간 탐색은 화면만 이동 · RDDF는 설계 경로')
+            frame_note = ('RDDF map 좌표 그대로 표시' if model.frame_mode == 'rddf_map'
+                          else 'Local/Global 동일 XY 이동 · yaw 회전 없음')
+            note = QtWidgets.QLabel('Space 재생/정지 · ←/→ 10초 · '+frame_note+
+                                   ' · 시간 탐색은 화면만 이동 · RDDF는 설계 경로')
             note.setStyleSheet('color:#777;padding:4px')
             note.setWordWrap(True)
             layout.addWidget(note)
@@ -355,9 +463,114 @@ def run_gui(model, seek, live=False, config=None):
             self.timer.timeout.connect(self.tick)
             self.timer.start(int(config['refresh_ms']))
             self.subscribers = self.subscribe_live() if live else []
+            if self.manual_enabled:
+                self.subscribers.append(rospy.Subscriber(INITIALIZATION_PREFIX+'/status', String,
+                    lambda message: self.initialization_signal.emit(message.data), queue_size=10))
             self.resize(1600, 1050)
             self.fit_view()
             self.render()
+
+        def initialization_changed(self, payload):
+            try:
+                status = json.loads(payload)
+                if not isinstance(status, dict) or not isinstance(status.get('state'), str):
+                    raise ValueError('initialization status requires state')
+            except (ValueError, TypeError):
+                self.selection_message = '초기화 상태 메시지가 올바르지 않습니다'
+                return
+            self.initialization = status
+            locked = status['state'] in ('READY', 'INITIALIZING', 'FAULT')
+            self.select_button.setEnabled(not locked)
+            self.route_choice.setEnabled(not locked and self.selection_active)
+            if locked and self.selection_active:
+                self.select_button.setChecked(False)
+            self.render()
+
+        def set_selection_active(self, active):
+            if active and self.initialization.get('state') in ('READY', 'INITIALIZING', 'FAULT'):
+                self.select_button.setChecked(False)
+                return
+            self.selection_active = bool(active)
+            self.manual_active.publish(Bool(self.selection_active))
+            self.preview = None
+            self.selection_message = ''
+            self.route_choice.setEnabled(self.selection_active)
+            self.select_button.setText('선택 취소 · GPS 대기' if active else '시작 위치 선택')
+            self.render_panel.setCursor(QtCore.Qt.CrossCursor if active else QtCore.Qt.ArrowCursor)
+            if active:
+                self.go_latest()
+                self.playing = False
+                self.frame.getManager().setFixedFrame(FRAME)
+                self.frame.getManager().getViewManager().setCurrentViewControllerType('rviz/TopDownOrtho')
+                self.view = self.frame.getManager().getViewManager().getCurrent()
+                self.view.subProp('Angle').setValue(0.)
+                self.view.subProp('Target Frame').setValue('<Fixed Frame>')
+            self.render()
+
+        def route_changed(self, _index):
+            self.preview = None
+            self.selection_message = ''
+            self.render()
+
+        def update_preview(self, point):
+            route = self.route_choice.currentData() or None
+            try:
+                view = self.frame.getManager().getViewManager().getCurrent()
+                if view.getClassId() != 'rviz/TopDownOrtho':
+                    raise ValueError('시작 위치 선택은 TopDownOrtho 화면에서만 가능합니다')
+                if (self.frame.getManager().getFixedFrame() != FRAME
+                        or str(view.subProp('Target Frame').getValue()) not in ('<Fixed Frame>', FRAME)):
+                    raise ValueError('RDDF 기준 프레임이 변경됐습니다. 시작 위치 선택을 다시 켜세요')
+                props = [float(view.subProp(name).getValue()) for name in ('Scale', 'X', 'Y', 'Angle')]
+                x, y = topdown_screen_to_map(point.x(), point.y(), self.render_panel.width(),
+                    self.render_panel.height(), *props, pixel_ratio=self.render_panel.devicePixelRatioF())
+                self.preview = self.route_map.match(x, y, self.manual_snap_distance, route_name=route)
+                if self.preview.get('accepted'):
+                    self.selection_message = ''
+                elif self.preview.get('reason') == 'AMBIGUOUS_ROUTE':
+                    self.selection_message = '서로 다른 진행 방향이 겹칩니다. 진행 경로를 선택하세요'
+                else:
+                    self.selection_message = '선택한 RDDF 선 가까이 마우스를 이동하세요: '+self.preview.get('reason', '')
+            except (ValueError, TypeError, RuntimeError) as error:
+                self.preview = None
+                self.selection_message = str(error)
+
+        def eventFilter(self, watched, event):
+            if watched is getattr(self, 'render_panel', None) and self.selection_active:
+                kind = event.type()
+                if kind == QtCore.QEvent.Leave:
+                    self.preview = None
+                    self.render()
+                elif kind in (QtCore.QEvent.MouseMove, QtCore.QEvent.MouseButtonPress,
+                              QtCore.QEvent.MouseButtonRelease, QtCore.QEvent.MouseButtonDblClick):
+                    self.update_preview(event.pos())
+                    if kind == QtCore.QEvent.MouseButtonPress and event.button() == QtCore.Qt.LeftButton:
+                        self.submit_manual_pose()
+                        self.render()
+                        return True
+                    if event.buttons() & QtCore.Qt.LeftButton or (
+                            kind != QtCore.QEvent.MouseMove and event.button() == QtCore.Qt.LeftButton):
+                        return True
+                    self.render()
+            return super().eventFilter(watched, event)
+
+        def submit_manual_pose(self):
+            if (not self.selection_active or self.initialization.get('state') in
+                    ('READY', 'INITIALIZING', 'FAULT')):
+                return
+            if not self.preview or not self.preview.get('accepted'):
+                self.selection_message = 'RDDF 선 가까이를 클릭하세요. 방향이 겹치면 진행 경로를 먼저 고르세요'
+                return
+            if self.manual_request.get_num_connections() < 1:
+                self.selection_message = '초기화 노드 연결 대기: 아직 시작 위치를 보내지 않았습니다'
+                return
+            try:
+                payload = manual_initialization_request(self.preview, rospy.Time.now().to_sec())
+            except ValueError as error:
+                self.selection_message = str(error)
+                return
+            self.manual_request.publish(String(json.dumps(payload, allow_nan=False)))
+            self.selection_message = '선택 위치 전송 완료 · 정지/IMU 확인 및 초기화 결과 대기'
 
         def fit_view(self):
             points = np.vstack(list(self.routes.values()) + [self.model.points(key)[:, :2] for key in ('local', 'global', 'gps')])
@@ -365,7 +578,8 @@ def run_gui(model, seek, live=False, config=None):
             center, span = (lower+upper)/2, np.maximum(upper-lower, 1)
             self.view.subProp('X').setValue(float(center[0]))
             self.view.subProp('Y').setValue(float(center[1]))
-            scale = .8*min(max(600, self.frame.width())/span[0], max(500, self.frame.height())/span[1])
+            scale = .8*self.render_panel.devicePixelRatioF()*min(
+                max(600, self.render_panel.width())/span[0], max(500, self.render_panel.height())/span[1])
             self.view.subProp('Scale').setValue(float(scale))
 
         def enqueue(self, key, message):
@@ -462,8 +676,22 @@ def run_gui(model, seek, live=False, config=None):
 
         def render(self):
             markers, current, last_times, counts = [], {}, {}, {}
-            for route in self.routes.values():
-                markers.append(self.marker(len(markers), Marker.LINE_STRIP, COLORS['rddf'], route, .15))
+            selected_route = self.route_choice.currentData() if self.manual_enabled and self.selection_active else None
+            if not selected_route and self.selection_active and self.preview and self.preview.get('accepted'):
+                selected_route = self.preview['route']
+            for name, route in self.routes.items():
+                color = (1., .8, .15) if name == selected_route else COLORS['rddf']
+                markers.append(self.marker(len(markers), Marker.LINE_STRIP, color, route, .15))
+            if self.selection_active and self.preview and self.preview.get('accepted'):
+                x, y, yaw = (self.preview[key] for key in ('x', 'y', 'yaw'))
+                c, s = math.cos(yaw), math.sin(yaw)
+                box = np.array([[-.675, -.425], [.675, -.425], [.675, .425], [-.675, .425], [-.675, -.425]])
+                points = box@np.array([[c, s], [-s, c]])+[x, y]
+                markers.append(self.marker(len(markers), Marker.LINE_STRIP, (1., .8, .15), points, .25))
+                markers[-1].ns = 'initialization_preview'
+                markers.append(self.marker(len(markers), Marker.ARROW, (1., .8, .15),
+                    [(x, y, .1), (x+3*c, y+3*s, .1)], .5))
+                markers[-1].ns = 'initialization_preview'
             for key in ('local', 'global', 'gps'):
                 count = bisect.bisect_right(self.times[key], self.position)
                 counts[key] = count
@@ -527,6 +755,31 @@ def run_gui(model, seek, live=False, config=None):
                     headings.append('{} yaw {:.1f}°'.format(label, math.degrees(yaw)))
             self.info.setText('상태: {}  valid={}  속도 {}  LiDAR: {}\n{}\n{}'.format(
                 state + (' | GPS·Local 기준점 대기' if self.model.shift is None else ''), valid, speed_text, '기록 있음' if scan_visible else '이 시점 표시 없음', calib_text, ' | '.join(headings)))
+            if self.manual_enabled:
+                status = self.initialization
+                state_text = {
+                    'WAITING_FOR_GPS': 'GPS 대기 · GPS가 없으면 시작 위치 선택',
+                    'WAITING_FOR_MANUAL': '지도에서 시작 위치 선택 대기',
+                    'WAITING_FOR_STATIONARY': '차량 정지 확인 대기',
+                    'WAITING_FOR_IMU': 'IMU 입력 대기',
+                    'INITIALIZING': '초기 위치·방향 적용 중',
+                    'READY': '초기 피팅 완료 · 시작 위치 선택 잠금',
+                    'FAULT': '초기화 오류',
+                }.get(status.get('state'), '초기화 노드 상태 대기')
+                text = state_text
+                if status.get('route'):
+                    text += ' | {} / 구간 {}'.format(status['route'], status.get('index', '?'))
+                if status.get('reason'):
+                    text += ' | '+str(status['reason'])
+                if self.selection_active:
+                    text += '\n차량을 선택 경로 중앙에 진행 방향으로 놓고 클릭 · Esc 선택 취소'
+                    if self.preview and self.preview.get('accepted'):
+                        text += ' | {}: ({:.2f}, {:.2f}) m, yaw {:.2f}°'.format(
+                            self.preview['route'], self.preview['x'], self.preview['y'],
+                            math.degrees(self.preview['yaw']))
+                if self.selection_message:
+                    text += '\n'+self.selection_message
+                self.initialization_label.setText(text)
             self.clock_label.setText('{:02d}:{:04.1f} / {:02d}:{:04.1f}'.format(
                 int(self.position)//60, self.position%60, int(self.duration)//60, self.duration%60))
             self.play_button.setText('⏸ 화면 정지' if self.playing or self.follow_live else '▶ 화면 재생')
@@ -539,13 +792,27 @@ def run_gui(model, seek, live=False, config=None):
                 'counts': counts, 'last_sample_times': last_times, 'scan_visible': bool(scan_visible),
                 'state': state, 'valid': bool(valid), 'calibration': calibration,
                 'common_xy_translation_m': self.summary['common_xy_translation_m'],
+                'frame_mode': self.model.frame_mode,
+                'initialization': self.initialization,
+                'manual_selection_active': self.selection_active,
+                'manual_preview': self.preview,
                 'processed_bag': self.summary['processed_bag'],
             }, allow_nan=False)))
 
         def closeEvent(self, event):
             self.timer.stop()
+            self.frame.getManager().stopUpdate()
+            if self.manual_enabled:
+                self.manual_active.publish(Bool(False))
             rospy.signal_shutdown('current-code viewer closed')
             event.accept()
+
+        def keyPressEvent(self, event):
+            if event.key() == QtCore.Qt.Key_Escape and self.selection_active:
+                self.select_button.setChecked(False)
+                event.accept()
+                return
+            super().keyPressEvent(event)
 
     app = QtWidgets.QApplication(sys.argv)
     window = Viewer()
@@ -554,7 +821,12 @@ def run_gui(model, seek, live=False, config=None):
     window.raise_()
     window.activateWindow()
     print('READY unified RViz', 'live' if live else model.summary['processed_bag'], flush=True)
-    return app.exec_()
+    result = app.exec_()
+    # RViz panel destruction posts Qt events. Destroy the frame while the Qt
+    # application still exists, including when Python signal cycles retain it.
+    window.deleteLater()
+    app.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    return result
 
 
 def main():
@@ -578,10 +850,20 @@ def main():
         if config['max_samples_per_topic']<2 or config['refresh_ms']<20: raise ValueError('invalid buffer/refresh limits')
         if args.mode == 'recorded':
             if not args.processed_bag: raise ValueError('--processed-bag is required; no historical bag is selected automatically')
-            model = load_data(args.processed_bag,args.source_bag,rddf,config['max_samples_per_topic'])
+            model = load_data(args.processed_bag,args.source_bag,rddf,config['max_samples_per_topic'],
+                              frame_mode=config.get('frame_mode', 'first_gps_translation'))
         else:
             if args.processed_bag or args.source_bag: raise ValueError('bag arguments require --mode recorded')
-            model = SceneData(rddf,limit=config['max_samples_per_topic'])
+            default_frame_mode = 'first_gps_translation'
+            if 'frame_mode' not in config:
+                try:
+                    if rospy.get_param('/mando_localization/initialization/enabled', False):
+                        default_frame_mode = 'rddf_map'
+                except (OSError, rospy.ROSException):
+                    if not args.check_only:
+                        raise
+            model = SceneData(rddf,limit=config['max_samples_per_topic'],
+                              frame_mode=config.get('frame_mode', default_frame_mode))
         if args.check_only:
             print(json.dumps(model.summary,indent=2,ensure_ascii=False)); return 0
         return run_gui(model,args.seek,args.mode=='live',config)

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/fusion.architecture.json",
+  "output": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/fusion.html",
+  "specification": {
+    "sha256": "e22b2c09d9e895201dd7dda7cdba2ace3e61102f5ec4c5d8dc33dd945fdc57ee",
+    "bytes": 2422
+  },
+  "artifact": {
+    "sha256": "2f679149db8c85a3f4a33bf59c0f935bb25befed72ffc3c8bcb0d4bbad03b92b",
+    "bytes": 800328
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/recovery.architecture.json",
+  "output": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/recovery.html",
+  "specification": {
+    "sha256": "77ae1f05d71531e6ffafcc6b27e5575f7b906476e0470194ed0bd92921a698ac",
+    "bytes": 2773
+  },
+  "artifact": {
+    "sha256": "796f33e4fbaffb77e2ce601c8918b820b305691da8fae4386a931fa4ef3de6b5",
+    "bytes": 801706
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

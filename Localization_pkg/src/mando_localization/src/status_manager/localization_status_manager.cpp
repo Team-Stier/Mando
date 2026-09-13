@@ -118,12 +118,18 @@ LocalizationStatusManager::LocalizationStatusManager(ros::NodeHandle nh,
   gps_device_path_ = requireParameter<std::string>(private_nh_, "devices/gps");
   imu_driver_node_ = requireParameter<std::string>(private_nh_, "nodes/imu_driver");
   gps_driver_node_ = requireParameter<std::string>(private_nh_, "nodes/gps_driver");
+  private_nh_.param("initialization/required", initialization_required_, false);
+  private_nh_.param("initialization/ready_timeout_sec",
+                    initialization_ready_timeout_sec_, 0.5);
+  private_nh_.param("initialization/max_pose_age_sec",
+                    initialization_pose_max_age_sec_, 1.0);
 
   const std::vector<double> positive_values = {
       imu_timeout_sec_, encoder_timeout_sec_, local_odometry_timeout_sec_,
       gps_timeout_sec_, lidar_timeout_sec_, global_odometry_timeout_sec_,
       status_publish_rate_hz_, max_position_variance_m2_,
-      max_cross_source_distance_m_, max_global_consistency_distance_m_};
+      max_cross_source_distance_m_, max_global_consistency_distance_m_,
+      initialization_ready_timeout_sec_, initialization_pose_max_age_sec_};
   const std::vector<double> nonnegative_values = {
       imu_max_future_sec_, encoder_max_future_sec_,
       local_odometry_max_future_sec_, gps_max_future_sec_,
@@ -160,6 +166,14 @@ LocalizationStatusManager::LocalizationStatusManager(ros::NodeHandle nh,
   lidar_relocalizing_subscriber_ = nh_.subscribe(
       lidar_relocalizing_topic, 10,
       &LocalizationStatusManager::lidarRelocalizingCallback, this);
+  if (initialization_required_) {
+    initialization_ready_subscriber_ = nh_.subscribe(
+        "/mando_localization/internal/initialization/ready", 10,
+        &LocalizationStatusManager::initializationReadyCallback, this);
+    initialization_pose_subscriber_ = nh_.subscribe(
+        "/mando_localization/internal/initialization/committed_pose", 10,
+        &LocalizationStatusManager::initializationPoseCallback, this);
+  }
 
   diagnostics_publisher_ = nh_.advertise<diagnostic_msgs::DiagnosticArray>(diagnostics_topic, 10);
   state_publisher_ = nh_.advertise<std_msgs::String>(state_topic, 1, true);
@@ -259,7 +273,9 @@ void LocalizationStatusManager::gpsPoseCallback(
   gps_status_.reason = gps_status_.payload_valid ? "ok" : "invalid_map_pose";
   gps_position_ = message->pose.pose.position;
   if (isFresh(gps_status_, gps_timeout_sec_, gps_max_future_sec_,
-              gps_status_.receipt_time)) {
+              gps_status_.receipt_time) &&
+      (!initialization_required_ ||
+       (initializationReady(gps_status_.receipt_time) && initialization_anchor_applied_))) {
     markAbsoluteMeasurement(gps_status_.receipt_time);
   }
 }
@@ -277,7 +293,9 @@ void LocalizationStatusManager::lidarPoseCallback(
   lidar_status_.reason = lidar_status_.payload_valid ? "ok" : "invalid_map_pose";
   lidar_position_ = message->pose.pose.position;
   if (isFresh(lidar_status_, lidar_timeout_sec_, lidar_max_future_sec_,
-              lidar_status_.receipt_time)) {
+              lidar_status_.receipt_time) &&
+      (!initialization_required_ ||
+       (initializationReady(lidar_status_.receipt_time) && initialization_anchor_applied_))) {
     markAbsoluteMeasurement(lidar_status_.receipt_time);
   }
 }
@@ -321,8 +339,85 @@ void LocalizationStatusManager::lidarRelocalizingCallback(
   lidar_relocalizing_ = message->data;
 }
 
+bool LocalizationStatusManager::initializationReady(const ros::Time& now) const {
+  if (!initialization_required_) return true;
+  if (!initialization_ready_ || initialization_ready_receipt_time_.isZero() ||
+      initialization_ready_wall_time_.isZero()) return false;
+  const double age = (now - initialization_ready_receipt_time_).toSec();
+  const double wall_age = (ros::WallTime::now() - initialization_ready_wall_time_).toSec();
+  return age >= 0.0 && age <= initialization_ready_timeout_sec_ &&
+         wall_age >= 0.0 && wall_age <= initialization_ready_timeout_sec_;
+}
+
+void LocalizationStatusManager::clearInitializationAnchor() {
+  initialization_pose_status_ = StreamStatus();
+  initialization_pose_wall_time_ = ros::WallTime();
+  initialization_anchor_applied_ = false;
+  anchor_seen_ = false;
+  last_absolute_time_ = ros::Time();
+  dead_reckoning_active_ = false;
+  dead_reckoning_distance_m_ = 0.0;
+  have_previous_global_position_ = false;
+  gps_status_ = StreamStatus();
+  lidar_status_ = StreamStatus();
+}
+
+void LocalizationStatusManager::applyInitializationAnchor(const ros::Time& now) {
+  if (!initialization_required_ || initialization_anchor_applied_ ||
+      !initializationReady(now) ||
+      !isFresh(initialization_pose_status_, initialization_pose_max_age_sec_,
+               global_odometry_max_future_sec_, now) ||
+      initialization_pose_wall_time_.isZero()) return;
+  const double wall_age = (ros::WallTime::now() - initialization_pose_wall_time_).toSec();
+  if (wall_age < 0.0 || wall_age > initialization_pose_max_age_sec_) return;
+  // A committed operator/RDDF pose is a one-time anchor, never a healthy GPS
+  // stream. Heartbeats and repeated latched messages must not extend the DR budget.
+  markAbsoluteMeasurement(initialization_pose_status_.stamp);
+  initialization_anchor_applied_ = true;
+}
+
+void LocalizationStatusManager::initializationReadyCallback(
+    const std_msgs::BoolConstPtr& message) {
+  const ros::Time now = ros::Time::now();
+  if (!message->data && (initialization_ready_ || initialization_anchor_applied_)) {
+    clearInitializationAnchor();
+  }
+  initialization_ready_ = message->data;
+  initialization_ready_receipt_time_ = now;
+  initialization_ready_wall_time_ = ros::WallTime::now();
+  applyInitializationAnchor(now);
+}
+
+void LocalizationStatusManager::initializationPoseCallback(
+    const geometry_msgs::PoseWithCovarianceStampedConstPtr& message) {
+  if (initialization_anchor_applied_) return;
+  const ros::Time now = ros::Time::now();
+  initialization_pose_status_.seen = true;
+  initialization_pose_status_.receipt_time = now;
+  initialization_pose_status_.stamp = message->header.stamp;
+  initialization_pose_status_.frame_id = message->header.frame_id;
+  initialization_pose_wall_time_ = ros::WallTime::now();
+  const auto& orientation = message->pose.pose.orientation;
+  const double norm_squared = orientation.x * orientation.x + orientation.y * orientation.y +
+                              orientation.z * orientation.z + orientation.w * orientation.w;
+  bool covariance_valid = validatePoseCovariance(message->pose.covariance);
+  for (std::size_t index = 0; index < 6; ++index) {
+    covariance_valid = covariance_valid && message->pose.covariance[index * 7] >= 0.0;
+  }
+  initialization_pose_status_.payload_valid =
+      !message->header.stamp.isZero() && message->header.frame_id == map_frame_ &&
+      validatePose(message->pose.pose) && std::abs(norm_squared - 1.0) <= 0.002 &&
+      covariance_valid;
+  initialization_pose_status_.reason = initialization_pose_status_.payload_valid
+      ? "committed_rddf_pose" : "invalid_committed_rddf_pose";
+  applyInitializationAnchor(now);
+}
+
 void LocalizationStatusManager::timerCallback(const ros::TimerEvent&) {
   const ros::Time now = ros::Time::now();
+  applyInitializationAnchor(now);
+  const bool startup_ready = initializationReady(now) &&
+      (!initialization_required_ || initialization_anchor_applied_);
   const bool imu_healthy =
       isFresh(imu_status_, imu_timeout_sec_, imu_max_future_sec_, now);
   const bool encoder_healthy = isFresh(
@@ -377,7 +472,9 @@ void LocalizationStatusManager::timerCallback(const ros::TimerEvent&) {
   input.seconds_since_absolute =
       anchor_seen_ ? std::max(0.0, (now - last_absolute_time_).toSec()) : 0.0;
   input.dead_reckoning_distance_m = dead_reckoning_distance_m_;
-  const StateDecision decision = evaluator_.evaluate(input);
+  const StateDecision decision = startup_ready ? evaluator_.evaluate(input)
+      : StateDecision{LocalizationState::INITIALIZING, false,
+                      "waiting_for_rddf_initialization"};
 
   std_msgs::String state_message;
   state_message.data = LocalizationStateEvaluator::toString(decision.state);
@@ -415,6 +512,19 @@ void LocalizationStatusManager::timerCallback(const ros::TimerEvent&) {
   diagnostics.status.push_back(makeStreamDiagnostic(
       "GLOBAL_ODOMETRY", global_odometry_status_, global_odometry_timeout_sec_,
       global_odometry_max_future_sec_, now, true));
+  if (initialization_required_) {
+    diagnostic_msgs::DiagnosticStatus startup;
+    startup.name = "RDDF_INITIALIZATION";
+    startup.hardware_id = "mando_localization";
+    startup.level = startup_ready ? diagnostic_msgs::DiagnosticStatus::OK
+                                  : diagnostic_msgs::DiagnosticStatus::WARN;
+    startup.message = startup_ready ? "COMMITTED" : "WAITING_FOR_INITIALIZATION";
+    startup.values.push_back(keyValue("ready_fresh", booleanText(initializationReady(now))));
+    startup.values.push_back(keyValue("anchor_applied", booleanText(initialization_anchor_applied_)));
+    startup.values.push_back(keyValue("pose_reason", initialization_pose_status_.reason));
+    startup.values.push_back(keyValue("anchor_kind", "one_time_rddf_pose_not_gps"));
+    diagnostics.status.push_back(startup);
+  }
 
   diagnostics.status.push_back(
       makeDeviceDiagnostic("IMU_DEVICE", imu_device_path_, true));

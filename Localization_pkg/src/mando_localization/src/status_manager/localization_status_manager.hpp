@@ -48,7 +48,14 @@ class LocalizationStatusManager {
   void globalOdometryCallback(const nav_msgs::OdometryConstPtr& message);
   void gpsRelocalizingCallback(const std_msgs::BoolConstPtr& message);
   void lidarRelocalizingCallback(const std_msgs::BoolConstPtr& message);
+  void initializationReadyCallback(const std_msgs::BoolConstPtr& message);
+  void initializationPoseCallback(
+      const geometry_msgs::PoseWithCovarianceStampedConstPtr& message);
   void timerCallback(const ros::TimerEvent& event);
+
+  bool initializationReady(const ros::Time& now) const;
+  void applyInitializationAnchor(const ros::Time& now);
+  void clearInitializationAnchor();
 
   bool isFresh(const StreamStatus& stream, double timeout_sec,
                double max_future_sec, const ros::Time& now) const;
@@ -76,6 +83,8 @@ class LocalizationStatusManager {
   ros::Subscriber global_odometry_subscriber_;
   ros::Subscriber gps_relocalizing_subscriber_;
   ros::Subscriber lidar_relocalizing_subscriber_;
+  ros::Subscriber initialization_ready_subscriber_;
+  ros::Subscriber initialization_pose_subscriber_;
   ros::Publisher diagnostics_publisher_;
   ros::Publisher state_publisher_;
   ros::Publisher valid_publisher_;
@@ -88,6 +97,15 @@ class LocalizationStatusManager {
   StreamStatus gps_status_;
   StreamStatus lidar_status_;
   StreamStatus global_odometry_status_;
+  StreamStatus initialization_pose_status_;
+  bool initialization_required_{false};
+  bool initialization_ready_{false};
+  bool initialization_anchor_applied_{false};
+  double initialization_ready_timeout_sec_{0.5};
+  double initialization_pose_max_age_sec_{1.0};
+  ros::Time initialization_ready_receipt_time_;
+  ros::WallTime initialization_ready_wall_time_;
+  ros::WallTime initialization_pose_wall_time_;
   uint16_t steering_adc_{0};
   int32_t encoder_delta_100ms_{0};
   bool brake_{false};

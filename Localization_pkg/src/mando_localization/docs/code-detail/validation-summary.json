@@ -1,0 +1,68 @@
+{
+  "sensors": {
+    "diagram_type": "architecture",
+    "output": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/sensors.html",
+    "specification_sha256": "efe96b41c43dccc185b346b7e555d4bd479b61c8e3b52f565fecb04c50a9f361",
+    "artifact_sha256": "f9677a14e52aa64507685b94b60c56e79bec822ea5d7f319ec088b13e5c922e3",
+    "validation": "9/9 showcase, 0 errors, 0 warnings",
+    "browser_evidence": "passed",
+    "visual_review": "passed",
+    "visual_review_scope": "1440x900 light and 2048x1320 dark screenshots inspected",
+    "correction_rounds": 0
+  },
+  "gps": {
+    "diagram_type": "architecture",
+    "output": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/gps.html",
+    "specification_sha256": "7774d84fea5dc8ce8dc650272a41fe541bd319a32efeb780bd3c13b10d8e44a3",
+    "artifact_sha256": "17d09cbe86a1f46ca4544e88057dcd3c598258977f5bbba5352bda1b8760866c",
+    "validation": "9/9 showcase, 0 errors, 0 warnings",
+    "browser_evidence": "passed",
+    "visual_review": "passed",
+    "visual_review_scope": "1440x900 light and 2048x1320 dark screenshots inspected",
+    "correction_rounds": 1
+  },
+  "recovery": {
+    "diagram_type": "architecture",
+    "output": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/recovery.html",
+    "specification_sha256": "77ae1f05d71531e6ffafcc6b27e5575f7b906476e0470194ed0bd92921a698ac",
+    "artifact_sha256": "796f33e4fbaffb77e2ce601c8918b820b305691da8fae4386a931fa4ef3de6b5",
+    "validation": "9/9 showcase, 0 errors, 0 warnings",
+    "browser_evidence": "passed",
+    "visual_review": "passed",
+    "visual_review_scope": "1440x900 light and 2048x1320 dark screenshots inspected",
+    "correction_rounds": 1
+  },
+  "state": {
+    "diagram_type": "architecture",
+    "output": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/state.html",
+    "specification_sha256": "12a7702505b2cbd862f942c699bf2dab24c5d180b8332eb8ac46ab2f53d02517",
+    "artifact_sha256": "d8ab8e54bde5059acbd39dacc26558cb460391ff9ce10d7e8e484d6b1eee9944",
+    "validation": "9/9 showcase, 0 errors, 0 warnings",
+    "browser_evidence": "passed",
+    "visual_review": "passed",
+    "visual_review_scope": "1440x900 light and 2048x1320 dark screenshots inspected",
+    "correction_rounds": 1
+  },
+  "output": {
+    "diagram_type": "architecture",
+    "output": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/output.html",
+    "specification_sha256": "673a0a7f464023bf924c8c7627d077dc7af32b8543e58462d570bd12f3583fcd",
+    "artifact_sha256": "333060bc6275185ceaa68fdcec9cbf62d9dd2a64bf6f40801b4fc9501f270171",
+    "validation": "9/9 showcase, 0 errors, 0 warnings",
+    "browser_evidence": "passed",
+    "visual_review": "passed",
+    "visual_review_scope": "1440x900 light and 2048x1320 dark screenshots inspected",
+    "correction_rounds": 1
+  },
+  "fusion": {
+    "diagram_type": "architecture",
+    "output": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/fusion.html",
+    "specification_sha256": "e22b2c09d9e895201dd7dda7cdba2ace3e61102f5ec4c5d8dc33dd945fdc57ee",
+    "artifact_sha256": "2f679149db8c85a3f4a33bf59c0f935bb25befed72ffc3c8bcb0d4bbad03b92b",
+    "validation": "9/9 showcase, 0 errors, 0 warnings",
+    "browser_evidence": "passed",
+    "visual_review": "passed",
+    "visual_review_scope": "1440x900 light and 2048x1320 dark screenshots inspected",
+    "correction_rounds": 0
+  }
+}

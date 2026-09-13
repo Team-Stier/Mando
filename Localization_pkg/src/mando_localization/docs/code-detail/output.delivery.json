@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/output.architecture.json",
+  "output": "/home/stier/Mando_1-5/localization/src/mando_localization/docs/code-detail/output.html",
+  "specification": {
+    "sha256": "673a0a7f464023bf924c8c7627d077dc7af32b8543e58462d570bd12f3583fcd",
+    "bytes": 2705
+  },
+  "artifact": {
+    "sha256": "333060bc6275185ceaa68fdcec9cbf62d9dd2a64bf6f40801b4fc9501f270171",
+    "bytes": 801597
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

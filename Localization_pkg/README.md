@@ -42,9 +42,12 @@ rosrun mando_localization localization_command.sh
 실제 지도와 해당 좌표계에 맞는 설정이 별도로 필요합니다.
 
 `rddf/`에는 현재 뷰어와 초기 방향 검사가 사용하는 용인 경로 원본을 그대로
-포함합니다. 기본 초기 yaw는 `yongin_1_right.csv`의 첫 행을 사용하므로 차량을
-해당 출발 방향에 배치해야 합니다. 다른 방향에서 시작하면
-`initialize_heading:=false` 또는 적절한 `initial_heading_config`를 사용합니다.
+포함합니다. 기본 시작 동작은 GPS 또는 RViz 수동 선택으로 RDDF 위치와 접선 방향을
+정하고 IMU·두 EKF를 초기화하는 방식입니다. 차량을 실제 RDDF 중심선 위에
+경로 진행 방향과 나란히 배치해야 합니다. 초기화 확인 전에는 최종 Odometry를
+차단합니다. 자세한 조건과 실패 동작은
+[`RDDF 초기화`](src/mando_localization/docs/rddf_startup.md)를 참고합니다.
+기존 고정 시작 방향 실험은 `start_rddf_initialization:=false`로 재현합니다.
 
 빌드 산출물, rosbag, 수집 기록, 로컬 분석 결과와 스냅샷은 Git에 포함하지 않습니다.
 합성 ROS 검사와 빌드 통과는 실차 정확도, GNSS/PPS 동기 또는 closed-loop 주행

@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "06 LiDAR 승인과 두 EKF",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1160,
+      650
+    ]
+  },
+  "components": [
+    {
+      "id": "fusion0",
+      "type": "backend",
+      "label": "LaserScan 검사",
+      "sublabel": "frame · 시각 · 유효 거리",
+      "pos": [
+        60,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "fusion1",
+      "type": "security",
+      "label": "AMCL pose 검사",
+      "sublabel": "map pose 품질",
+      "pos": [
+        455,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "fusion2",
+      "type": "security",
+      "label": "연속 안정 pose",
+      "sublabel": "점프·yaw·후보 군집",
+      "pos": [
+        850,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "fusion3",
+      "type": "security",
+      "label": "Local EKF",
+      "sublabel": "odom 기준 추측 항법",
+      "pos": [
+        850,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "fusion4",
+      "type": "security",
+      "label": "Global EKF",
+      "sublabel": "움직임 + 승인 절대 pose",
+      "pos": [
+        455,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "fusion5",
+      "type": "backend",
+      "label": "지연 측정 재처리",
+      "sublabel": "2초 이력",
+      "pos": [
+        60,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "fusionedge0",
+      "from": "fusion0",
+      "to": "fusion1",
+      "label": "scan 상태"
+    },
+    {
+      "id": "fusionedge1",
+      "from": "fusion1",
+      "to": "fusion2",
+      "label": "pose 후보"
+    },
+    {
+      "id": "fusionedge2",
+      "from": "fusion4",
+      "to": "fusion5",
+      "label": "지연 측정"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "처리 기준",
+      "items": [
+        "각 단계의 조건과 결과는 상세 설명에서 확인"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "검증 범위",
+      "items": [
+        "현재 소스 정적 확인 · 실차 검증 아님",
+        "파일·함수·줄 번호는 상세 설명과 연결"
+      ]
+    }
+  ]
+}

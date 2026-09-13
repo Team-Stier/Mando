@@ -36,6 +36,12 @@ OdometryGpsFusion::OdometryGpsFusion(const ros::NodeHandle& node,
                                      const ros::NodeHandle& private_node)
     : node_(node), private_node_(private_node) {
   load_configuration();
+  private_node_.param("initialization/required", initialization_required_, false);
+  if (initialization_required_) {
+    initialization_subscriber_ = node_.subscribe(
+        "/mando_localization/internal/initialization/ready", 2,
+        &OdometryGpsFusion::initialization_ready_callback, this);
+  }
   pose_publisher_ =
       node_.advertise<geometry_msgs::PoseWithCovarianceStamped>(
           pose_topic_, 10, false);
@@ -163,9 +169,9 @@ void OdometryGpsFusion::load_configuration() {
   requireNonEmpty(odom_frame_, "frames/odom");
   requireNonEmpty(base_link_frame_, "frames/base_link");
   requireNonEmpty(gps_frame_, "frames/gps");
-  if (reference_mode_ != "first_fix" && reference_mode_ != "manual_datum") {
+  if (reference_mode_ != "first_fix" && reference_mode_ != "manual_datum" && reference_mode_ != "rddf_datum") {
     throw std::runtime_error(
-        "reference/mode must be first_fix or manual_datum");
+        "reference/mode must be first_fix, manual_datum or rddf_datum");
   }
   if (!std::isfinite(yaw_offset_rad_)) {
     throw std::runtime_error("reference/yaw_offset_rad must be finite");
@@ -245,8 +251,8 @@ void OdometryGpsFusion::load_configuration() {
   }
   recovery_gate_ = ConsecutiveRecoveryGate(required_consecutive_fixes);
 
-  if (reference_mode_ == "manual_datum") {
-    if (!datum_measured_) {
+  if (reference_mode_ == "manual_datum" || reference_mode_ == "rddf_datum") {
+    if (reference_mode_ == "manual_datum" && !datum_measured_) {
       throw std::runtime_error(
           "manual_datum requires reference/measured=true");
     }
@@ -269,7 +275,8 @@ void OdometryGpsFusion::load_configuration() {
     if (!validLatitudeLongitude(datum_.latitude_deg, datum_.longitude_deg) ||
         !std::isfinite(datum_.altitude_m) ||
         !std::isfinite(datum_.map_x_m) || !std::isfinite(datum_.map_y_m) ||
-        !std::isfinite(datum_.map_z_m) || measured_at.empty() ||
+        !std::isfinite(datum_.map_z_m) ||
+        (reference_mode_ == "manual_datum" && measured_at.empty()) ||
         source.empty()) {
       throw std::runtime_error("manual datum values must be finite WGS84 data");
     }
@@ -278,6 +285,27 @@ void OdometryGpsFusion::load_configuration() {
         lever_arm_in_map(manual_datum_base_yaw_rad_);
     reference_lever_arm_ready_ = true;
   }
+}
+
+bool OdometryGpsFusion::initialization_ready_is_fresh() const {
+  return !initialization_required_ ||
+      (initialization_ready_ && !initialization_receipt_.isZero() &&
+       (ros::SteadyTime::now() - initialization_receipt_).toSec() <= 0.5);
+}
+
+void OdometryGpsFusion::initialization_ready_callback(const std_msgs::Bool::ConstPtr& message) {
+  if (message->data != initialization_ready_) {
+    // Local set_pose changes its coordinates. Never retain the pre-reset GPS
+    // prediction anchor or interpolate across that reset boundary.
+    const bool clock_value = clock_ready_;
+    const ros::SteadyTime clock_receipt = clock_ready_receipt_;
+    reset_time_epoch();
+    clock_ready_ = clock_value;
+    clock_ready_receipt_ = clock_receipt;
+    initialization_stamp_ = ros::Time::now();
+  }
+  initialization_ready_ = message->data;
+  initialization_receipt_ = ros::SteadyTime::now();
 }
 
 void OdometryGpsFusion::observe_clock(const ros::Time& now) {
@@ -334,6 +362,7 @@ void OdometryGpsFusion::pending_timer_callback(const ros::WallTimerEvent&) {
 }
 
 void OdometryGpsFusion::process_pending() {
+  if (!initialization_ready_is_fresh()) { pending_fixes_.clear(); return; }
   if (!clock_ready_is_fresh()) {
     pending_fixes_.clear();
     recovery_gate_.markUnhealthy();
@@ -372,6 +401,8 @@ void OdometryGpsFusion::process_pending() {
 
 void OdometryGpsFusion::local_odometry_callback(
     const nav_msgs::Odometry::ConstPtr& message) {
+  if (!initialization_ready_is_fresh() ||
+      (initialization_required_ && message->header.stamp <= initialization_stamp_)) return;
   const ros::Time now = ros::Time::now();
   observe_clock(now);
   std::string reason;
@@ -668,8 +699,8 @@ OdometryGpsFusion::ProjectedPoint OdometryGpsFusion::correct_to_base_link(
     const ProjectedPoint& antenna_point,
     const ProjectedPoint& current_lever_arm) const {
   ProjectedPoint base_point = antenna_point;
-  base_point.x_m += reference_lever_arm_map_.x_m - current_lever_arm.x_m;
-  base_point.y_m += reference_lever_arm_map_.y_m - current_lever_arm.y_m;
+  base_point.x_m += (reference_mode_ == "rddf_datum" ? 0.0 : reference_lever_arm_map_.x_m) - current_lever_arm.x_m;
+  base_point.y_m += (reference_mode_ == "rddf_datum" ? 0.0 : reference_lever_arm_map_.y_m) - current_lever_arm.y_m;
   return base_point;
 }
 
@@ -734,6 +765,8 @@ geometry_msgs::PoseWithCovarianceStamped OdometryGpsFusion::make_pose(
 // 반환값: 없음
 void OdometryGpsFusion::gps_callback(
     const sensor_msgs::NavSatFix::ConstPtr& message) {
+  if (!initialization_ready_is_fresh() ||
+      (initialization_required_ && message->header.stamp <= initialization_stamp_)) return;
   const ros::Time now = ros::Time::now();
   observe_clock(now);
   std::string reason;

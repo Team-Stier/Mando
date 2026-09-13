@@ -1,4 +1,6 @@
 <launch>
+  <arg name="start_rddf_initialization" default="false"/>
+  <arg name="rddf_initialization_config" default="$(find mando_localization)/config/rddf_initialization.yaml"/>
   <arg name="interfaces_config" default="$(find mando_localization)/config/localization_interfaces.yaml"/>
   <arg name="imu_driver_config" default="$(find mando_localization)/config/imu_driver.yaml"/>
   <arg name="imu_heading_config" default="$(find mando_localization)/config/imu_heading_calibration.yaml"/>
@@ -41,6 +43,7 @@
           name="$(arg calibrated_imu_node_name)" output="screen" clear_params="true">
       <rosparam command="load" file="$(arg interfaces_config)"/>
       <rosparam command="load" file="$(arg imu_heading_config)"/>
+      <param name="initialization/required" value="$(arg start_rddf_initialization)"/>
       <rosparam if="$(arg initialize_heading)" command="load" file="$(arg initial_heading_config)"/>
     </node>
   </group>

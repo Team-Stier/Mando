@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Mando Localization 현재 코드 구조",
+    "output": "localization-code-architecture.html",
+    "quality_profile": "showcase",
+    "viewBox": [1390, 800]
+  },
+  "components": [
+    { "id": "sensors", "type": "external", "label": "Real Sensors", "sublabel": "Encoder · IMU · GNSS · LiDAR", "pos": [40, 300], "size": [170, 76] },
+    { "id": "preprocess", "type": "backend", "label": "Input Adapters", "sublabel": "IMU calibration · encoder twist", "pos": [270, 300], "size": [200, 76] },
+    { "id": "localEkf", "type": "backend", "label": "Local EKF", "sublabel": "IMU + encoder dead reckoning", "pos": [550, 120], "size": [190, 76], "tag": "odom → base_link" },
+    { "id": "gpsGate", "type": "security", "label": "GPS Quality Gate", "sublabel": "time · covariance · innovation", "pos": [550, 290], "size": [190, 76], "tag": "odometry_gps_fusion" },
+    { "id": "lidarGate", "type": "security", "label": "LiDAR / AMCL Gate", "sublabel": "map match quality check", "pos": [550, 460], "size": [190, 76], "tag": "odometry_lidar_fusion" },
+    { "id": "globalEkf", "type": "backend", "label": "Global EKF", "sublabel": "motion + approved absolute poses", "pos": [830, 290], "size": [200, 76], "tag": "map → odom" },
+    { "id": "supervisor", "type": "security", "label": "Localization Supervisor", "sublabel": "status + relocalization coordinator", "pos": [830, 90], "size": [220, 80], "tag": "fail-closed" },
+    { "id": "outputGate", "type": "security", "label": "Output Gate", "sublabel": "valid + freshness + frame checks", "pos": [1110, 290], "size": [190, 76], "tag": "/molit/localization/odometry" },
+    { "id": "tfTree", "type": "messagebus", "label": "TF Tree", "sublabel": "map → odom → base_link → sensors", "pos": [830, 520], "size": [220, 72] },
+    { "id": "consumers", "type": "frontend", "label": "Planner / RViz", "sublabel": "approved odometry + diagnostics", "pos": [1110, 520], "size": [190, 72] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Local tracking", "wraps": ["preprocess", "localEkf"] },
+    { "kind": "security-group", "label": "Absolute measurement gates", "wraps": ["gpsGate", "lidarGate"] },
+    { "kind": "security-group", "label": "Fail-closed publication", "wraps": ["supervisor", "outputGate"] }
+  ],
+  "connections": [
+    { "id": "raw-input", "from": "sensors", "to": "preprocess", "label": "raw ROS topics", "variant": "emphasis", "labelDy": -34 },
+    { "id": "motion-to-local", "from": "preprocess", "to": "localEkf", "label": "calibrated IMU + twist", "variant": "emphasis" },
+    { "id": "gps-input", "from": "preprocess", "to": "gpsGate", "label": "GNSS fix / NavPVT", "labelAt": [430, 260] },
+    { "id": "lidar-input", "from": "preprocess", "to": "lidarGate", "label": "LaserScan" },
+    { "id": "local-to-gps", "from": "localEkf", "to": "gpsGate", "label": "local innovation", "fromSide": "bottom", "toSide": "top", "labelAt": [645, 210] },
+    { "id": "gps-to-lidar", "from": "gpsGate", "to": "lidarGate", "label": "initial pose support", "fromSide": "bottom", "toSide": "top", "labelAt": [645, 410] },
+    { "id": "motion-to-global", "from": "preprocess", "to": "globalEkf", "label": "same IMU + twist", "fromSide": "top", "toSide": "left", "via": [[370, 50], [790, 50], [790, 328]], "labelAt": [465, 64] },
+    { "id": "gps-to-global", "from": "gpsGate", "to": "globalEkf", "label": "approved GPS pose", "variant": "emphasis", "labelAt": [730, 270] },
+    { "id": "lidar-to-global", "from": "lidarGate", "to": "globalEkf", "label": "approved LiDAR pose", "labelAt": [785, 430] },
+    { "id": "estimates-to-supervisor", "from": "globalEkf", "to": "supervisor", "label": "local/global health", "fromSide": "top", "toSide": "bottom" },
+    { "id": "global-to-output", "from": "globalEkf", "to": "outputGate", "label": "global odometry", "variant": "emphasis", "labelAt": [1020, 270] },
+    { "id": "valid-to-output", "from": "supervisor", "to": "outputGate", "label": "state + valid", "variant": "security" },
+    { "id": "global-tf", "from": "globalEkf", "to": "tfTree", "label": "map → odom", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "id": "approved-output", "from": "outputGate", "to": "consumers", "label": "final odometry", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "labelAt": [1205, 400] },
+    { "id": "tf-to-consumers", "from": "tfTree", "to": "consumers", "label": "/tf + /tf_static", "variant": "dashed", "labelDy": -30 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Local 위치추정", "items": ["Local EKF는 IMU yaw/yaw-rate와 엔코더 속도로 odom 기준 dead reckoning 수행", "Local Odometry는 절대 위치가 아니며 장시간 GPS 단절 시 drift 가능"] },
+    { "dot": "emerald", "title": "Global 보정", "items": ["GPS와 LiDAR/AMCL은 각각 품질 게이트를 통과한 pose만 Global EKF에 입력", "Global EKF가 map → odom TF를 소유하고 지연 GPS를 history 기반으로 재처리"] },
+    { "dot": "rose", "title": "안전 출력", "items": ["Supervisor가 TRACKING · DEGRADED · RELOCALIZING · FAULT 상태와 valid 결정", "Output Gate는 valid, timestamp, frame, covariance 검사를 통과한 Global Odometry만 공개"] }
+  ]
+}

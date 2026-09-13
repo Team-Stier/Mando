@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "04 상태 결정의 우선순위",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1160,
+      650
+    ]
+  },
+  "components": [
+    {
+      "id": "state0",
+      "type": "backend",
+      "label": "Local motion 검사",
+      "sublabel": "1순위",
+      "pos": [
+        60,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "state1",
+      "type": "security",
+      "label": "재정합 검사",
+      "sublabel": "2순위",
+      "pos": [
+        455,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "state2",
+      "type": "security",
+      "label": "Global 출력 검사",
+      "sublabel": "3순위",
+      "pos": [
+        850,
+        100
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "state3",
+      "type": "security",
+      "label": "절대 소스 검사",
+      "sublabel": "4순위",
+      "pos": [
+        850,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "state4",
+      "type": "security",
+      "label": "anchor와 DR 예산",
+      "sublabel": "5·6순위",
+      "pos": [
+        455,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    },
+    {
+      "id": "state5",
+      "type": "backend",
+      "label": "Supervisor 최종 중재",
+      "sublabel": "heartbeat 우선",
+      "pos": [
+        60,
+        380
+      ],
+      "size": [
+        250,
+        90
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "stateedge0",
+      "from": "state0",
+      "to": "state1",
+      "label": "그 외 조건 검사"
+    },
+    {
+      "id": "stateedge1",
+      "from": "state1",
+      "to": "state2",
+      "label": "그 외 조건 검사"
+    },
+    {
+      "id": "stateedge2",
+      "from": "state2",
+      "to": "state3",
+      "label": "그 외 조건 검사",
+      "labelAt": [
+        975,
+        280
+      ]
+    },
+    {
+      "id": "stateedge3",
+      "from": "state3",
+      "to": "state4",
+      "label": "그 외 조건 검사"
+    },
+    {
+      "id": "stateedge4",
+      "from": "state4",
+      "to": "state5",
+      "label": "다음 처리"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "처리 기준",
+      "items": [
+        "각 단계의 조건과 결과는 상세 설명에서 확인"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "검증 범위",
+      "items": [
+        "현재 소스 정적 확인 · 실차 검증 아님",
+        "파일·함수·줄 번호는 상세 설명과 연결"
+      ]
+    }
+  ]
+}
